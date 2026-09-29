@@ -68,6 +68,11 @@ def mask_pii(text: str, counters: dict[str, int] | None = None) -> MaskResult:
     return MaskResult(text=result, hits=hits)
 
 
+def contains_pii(text: str) -> bool:
+    """Есть ли в тексте персональные данные с верной проверкой."""
+    return bool(mask_pii(text).hits)
+
+
 def inn_checksum_ok(digits: str) -> bool:
     if len(digits) == 10:
         weights = (2, 4, 10, 3, 5, 9, 4, 6, 8)
