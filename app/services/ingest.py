@@ -70,6 +70,7 @@ def _parse_to_hexlet_chunks(
                     "page": row.page,
                     "section": row.section,
                     "article": row.article,
+                    "articul": row.article,
                     "brand": row.brand,
                     "kind": "table",
                 },

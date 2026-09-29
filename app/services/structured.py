@@ -4,7 +4,6 @@ import json
 
 from pydantic import ValidationError
 
-from app.llm.client import LlmClient
 from app.llm.parse import parse_model_json
 from app.schemas.cards import (
     CardDraft,
@@ -23,7 +22,11 @@ class CardValidationError(ValueError):
 
 async def run_agent(agent, prompt: str) -> str:
     """Точка вызова модели для тестов Хекслета."""
-    return LlmClient().complete(str(agent), prompt)
+    from app.llm import client as llm_client
+
+    llm_client.setup_llm()
+    result = await llm_client.Runner.run(agent, prompt)
+    return getattr(result, "final_output", "") or str(result)
 
 
 async def validate_or_retry(prompt: str, *, max_attempts: int = 3) -> CardDraft:
@@ -47,6 +50,33 @@ async def validate_or_retry(prompt: str, *, max_attempts: int = 3) -> CardDraft:
     raise CardValidationError(str(last_error) if last_error else "невалидная карточка")
 
 
+async def regenerate_field(card: CardDraft, field: str, error: str) -> CardDraft:
+    """Исправить одно поле карточки."""
+    prompt = (
+        "Текущий черновик:\n"
+        + card.model_dump_json()
+        + f"\n\nИсправь только поле {field}. {error}"
+    )
+    raw = await run_agent("repair", prompt)
+    data = parse_model_json(raw) if isinstance(raw, str) else raw
+    if isinstance(data, str):
+        data = parse_model_json(data)
+    if not isinstance(data, dict) or field not in data:
+        raise CardValidationError(f"в ответе нет поля {field}")
+    updated = card.model_dump()
+    updated[field] = data[field]
+    return CardDraft.model_validate(updated)
+
+
+def confidence_gate(card: CardDraft) -> str:
+    """Порог уверенности. Имя из каркаса Хекслета."""
+    from app.core.config import settings
+
+    if card.confidence < settings.confidence_threshold:
+        return "needs_review"
+    return "done"
+
+
 __all__ = [
     "CardDraft",
     "CardRules",
@@ -56,6 +86,8 @@ __all__ = [
     "SeoBlock",
     "SourceRef",
     "SupplierFacts",
+    "confidence_gate",
+    "regenerate_field",
     "run_agent",
     "validate_or_retry",
 ]

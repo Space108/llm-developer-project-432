@@ -19,6 +19,17 @@ def setup_llm() -> None:
     return None
 
 
+class Runner:
+    """Заглушка имени из каркаса (openai-agents Runner) для патча в тестах."""
+
+    @staticmethod
+    async def run(agent, prompt: str):
+        class _Result:
+            final_output = ""
+
+        return _Result()
+
+
 class LlmClient:
     """Вызов модели за одной границей: таймаут, ретраи, OpenAI-совместимый API."""
 

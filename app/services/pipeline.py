@@ -169,12 +169,12 @@ async def run_pipeline(
         report = CritiqueReport.model_validate(parse_model_json(raw))
         if report.verdict == "approve":
             verdict = "approved"
-            status = "approved"
+            status = "done"
             break
         feedback = report.issues
     if draft is None:
         raise RuntimeError("pipeline produced no draft")
-    if verdict == "approved" and draft.confidence < settings.confidence_threshold:
+    if status != "done" and draft.confidence < settings.confidence_threshold:
         verdict = "awaiting_confirmation"
         status = "awaiting_confirmation"
     return draft, attempts, verdict, status
@@ -233,7 +233,11 @@ def read_model(system: str, user: str, model: type[T], *, cheap: bool = False) -
 
 async def run_agent(agent, prompt: str) -> str:
     """Точка вызова модели для тестов Хекслета."""
-    return LlmClient().complete(str(agent), prompt)
+    from app.llm import client as llm_client
+
+    llm_client.setup_llm()
+    result = await llm_client.Runner.run(agent, prompt)
+    return getattr(result, "final_output", "") or str(result)
 
 
 def repair_field(data: dict, field: str, model: type[T], schema: dict) -> T:

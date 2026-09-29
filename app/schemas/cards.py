@@ -16,6 +16,7 @@ class SourceRef(BaseModel):
 class SeoBlock(BaseModel):
     title: str = ""
     description: str = ""
+    keywords: list[str] = Field(default_factory=list)
 
 
 Seo = SeoBlock
@@ -39,6 +40,11 @@ class SecurityReport(BaseModel):
     blocked: bool = False
     block_reason: str | None = None
     suspicious_chunks: list[str] = Field(default_factory=list)
+
+    @property
+    def masked_pii(self) -> int:
+        """Число замаскированных сущностей. Имя из каркаса Хекслета."""
+        return len(self.masked)
 
     @property
     def needs_review(self) -> bool:

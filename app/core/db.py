@@ -97,6 +97,23 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
 
     def __enter__(self):
         self._sync_conn = psycopg.connect(sync_database_url(settings.database_url))
+        with self._sync_conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chunks (
+                    id text PRIMARY KEY,
+                    doc_id text NOT NULL,
+                    content text NOT NULL DEFAULT '',
+                    embedding vector(768),
+                    metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS chunks_doc_id_idx ON chunks (doc_id)"
+            )
+        self._sync_conn.commit()
         return self._sync_conn
 
     def __exit__(self, exc_type, exc, tb) -> None:
