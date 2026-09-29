@@ -19,6 +19,11 @@ def configure_logging() -> None:
     )
 
 
+def setup_logging() -> None:
+    """Имя из каркаса Хекслета. То же, что configure_logging."""
+    configure_logging()
+
+
 def get_logger():
     return structlog.get_logger()
 

@@ -16,6 +16,9 @@ class SeoBlock(BaseModel):
     description: str = ""
 
 
+Seo = SeoBlock
+
+
 class SupplierFacts(BaseModel):
     product_name: str
     characteristics: dict[str, str] = Field(default_factory=dict)
