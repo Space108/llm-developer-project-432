@@ -1,6 +1,5 @@
 """Защита контекста и выхода. Имена — из каркаса Хекслета."""
 
-import asyncio
 import json
 
 from app.core.config import settings
@@ -18,16 +17,22 @@ async def detect_injection_llm(text: str):
     return await injection_mod.detect_injection_llm(text)
 
 
-def guard_context(
-    payload: str | list[FragmentHit],
+async def guard_context(
+    payload: str | list[FragmentHit] | list[dict],
     limit: int | None = None,
-) -> tuple[str, GuardReport] | ScreenedContext:
-    """Маскирование PII и отсев инъекций до модели.
+) -> tuple[str | list, GuardReport] | ScreenedContext:
+    """Маскирование PII и отсев инъекций до модели."""
+    if isinstance(payload, list) and payload and isinstance(payload[0], FragmentHit):
+        return screen_hits(
+            payload,  # type: ignore[arg-type]
+            limit if limit is not None else settings.context_size_limit,
+        )
 
-    Строка — маска и проверка текста. Список фрагментов — полный screen_hits.
-    """
     if isinstance(payload, list):
-        return screen_hits(payload, limit if limit is not None else settings.context_size_limit)
+        return await _guard_chunk_dicts(
+            payload,  # type: ignore[arg-type]
+            limit if limit is not None else settings.context_size_limit,
+        )
 
     counters: dict[str, int] = {}
     masked = mask_pii(payload, counters)
@@ -38,7 +43,7 @@ def guard_context(
     excluded: list[SecurityFinding] = []
     text = masked.text
     try:
-        verdict = asyncio.run(detect_injection_llm(text))
+        verdict = await detect_injection_llm(text)
     except Exception as exc:
         verdict = injection_mod.InjectionVerdict(
             suspicious=True,
@@ -55,6 +60,61 @@ def guard_context(
             suspicious_chunks=["context"],
         )
     return text, GuardReport(masked=findings, excluded=excluded)
+
+
+async def _guard_chunk_dicts(
+    chunks: list[dict],
+    limit: int,
+) -> tuple[list[dict], GuardReport]:
+    counters: dict[str, int] = {}
+    findings: list[SecurityFinding] = []
+    excluded: list[SecurityFinding] = []
+    suspicious_ids: list[str] = []
+    safe: list[dict] = []
+    size = 0
+
+    for chunk in chunks:
+        chunk_id = str(chunk.get("chunk_id") or "")
+        raw = str(chunk.get("text") or "")
+        masked = mask_pii(raw, counters)
+        for item in masked.hits:
+            findings.append(
+                SecurityFinding(kind=item.kind, label=item.label, fragment_id=chunk_id or None)
+            )
+        try:
+            verdict = await detect_injection_llm(masked.text)
+        except Exception as exc:
+            verdict = injection_mod.InjectionVerdict(
+                suspicious=True,
+                reason=f"детектор недоступен: {exc}",
+            )
+        if verdict.suspicious:
+            reason = verdict.reason or "инъекция"
+            excluded.append(
+                SecurityFinding(kind="injection", label=reason, fragment_id=chunk_id or None)
+            )
+            if chunk_id:
+                suspicious_ids.append(chunk_id)
+            continue
+        piece = dict(chunk)
+        piece["text"] = masked.text
+        if size + len(masked.text) > limit and safe:
+            break
+        safe.append(piece)
+        size += len(masked.text)
+
+    blocked = len(suspicious_ids) > settings.suspicious_chunk_limit
+    reason = None
+    if blocked:
+        reason = f"подозрительных фрагментов {len(suspicious_ids)}"
+        safe = []
+    return safe, GuardReport(
+        masked=findings,
+        excluded=excluded,
+        blocked=blocked,
+        block_reason=reason,
+        suspicious_chunks=suspicious_ids,
+    )
 
 
 def guard_output(draft: CardDraft | str) -> tuple[CardDraft | str, GuardReport]:

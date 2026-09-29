@@ -7,6 +7,11 @@ class TextBlock:
     section: str
     text: str
 
+    @property
+    def content(self) -> str:
+        """Имя поля из каркаса Хекслета."""
+        return self.text
+
 
 @dataclass
 class TableRow:

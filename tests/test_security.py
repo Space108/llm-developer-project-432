@@ -22,7 +22,7 @@ def _hit(fragment_id: str, body: str) -> FragmentHit:
 def test_phone_is_masked() -> None:
     result = mask_pii("Звоните +7 926 555-14-08")
     assert "+7 926 555-14-08" not in result.text
-    assert "телефон номер 1" in result.text
+    assert "[PHONE_1]" in result.text
     assert result.hits[0].kind == "phone"
     assert result.hits[0].original == "+7 926 555-14-08"
 
@@ -32,15 +32,15 @@ def test_valid_card_is_masked() -> None:
     number = "4111 1111 1111 1111"
     result = mask_pii(f"карта {number}")
     assert number not in result.text
-    assert "номер карты номер 1" in result.text
+    assert "[CARD_1]" in result.text
 
 
 def test_email_and_valid_inn_are_masked() -> None:
     result = mask_pii("почта a.smirnova@example.com ИНН 7712345671")
     assert "a.smirnova@example.com" not in result.text
     assert "7712345671" not in result.text
-    assert "почта номер 1" in result.text
-    assert "номер налогоплательщика номер 1" in result.text
+    assert "[EMAIL_1]" in result.text
+    assert "[INN_1]" in result.text
     assert inn_checksum_ok("7712345671")
 
 
@@ -165,5 +165,5 @@ def test_screen_masks_pii_before_context(monkeypatch) -> None:
     assert "+7 926 555-14-08" not in screened.built.text
     assert "a.smirnova@example.com" not in screened.built.text
     assert "7712345671" not in screened.built.text
-    assert "телефон номер 1" in screened.built.text
+    assert "[PHONE_1]" in screened.built.text
     assert len(screened.security.masked) >= 3

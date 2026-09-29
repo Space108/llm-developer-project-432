@@ -28,10 +28,10 @@ _INN_RE = re.compile(r"(?<!\d)(\d{10}|\d{12})(?!\d)")
 _CARD_RE = re.compile(r"(?<!\d)(?:\d[ \-]?){13,19}(?!\d)")
 
 _KIND_NAMES = {
-    "phone": "телефон",
-    "email": "почта",
-    "inn": "номер налогоплательщика",
-    "card": "номер карты",
+    "phone": "PHONE",
+    "email": "EMAIL",
+    "inn": "INN",
+    "card": "CARD",
 }
 
 
@@ -43,7 +43,7 @@ def mask_pii(text: str, counters: dict[str, int] | None = None) -> MaskResult:
 
     def _replace(kind: str, original: str) -> str:
         counters[kind] = counters.get(kind, 0) + 1
-        label = f"{_KIND_NAMES[kind]} номер {counters[kind]}"
+        label = f"[{_KIND_NAMES[kind]}_{counters[kind]}]"
         hits.append(PiiHit(kind=kind, label=label, original=original))
         return label
 

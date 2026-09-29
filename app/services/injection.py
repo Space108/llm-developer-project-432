@@ -33,6 +33,7 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
         r"(вытащи|раскрой|reveal|dump).{0,30}(промпт|prompt|system)",
         re.I,
     )),
+    ("price_one_ruble", re.compile(r"(?<!\d)1\s*рубл", re.IGNORECASE)),
     (
         "long_encoded",
         re.compile(r"(?:[A-Za-z0-9+/]{80,}={0,2})"),

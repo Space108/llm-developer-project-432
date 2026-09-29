@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from typing import Any
 
+import psycopg
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -47,6 +48,16 @@ def async_database_url(url: str) -> str:
     return url
 
 
+def sync_database_url(url: str) -> str:
+    """DSN для psycopg (sync-путь каркаса Хекслета)."""
+    cleaned = url
+    for prefix in ("postgresql+asyncpg://", "postgresql+psycopg://", "postgres://"):
+        if cleaned.startswith(prefix):
+            cleaned = "postgresql://" + cleaned.removeprefix(prefix)
+            break
+    return cleaned
+
+
 def open_pool() -> AsyncEngine:
     """Движок и фабрика сессий живут вместе с процессом. Соединение здесь не берётся."""
     global _engine, session_factory
@@ -76,87 +87,42 @@ def pool():
     return _engine.pool
 
 
-class _SyncConnProxy:
-    """Синхронная обёртка над AsyncConnection для тестов каркаса Хекслета."""
-
-    def __init__(self, conn: AsyncConnection, loop: asyncio.AbstractEventLoop) -> None:
-        self._conn = conn
-        self._loop = loop
-
-    def execute(self, *args: Any, **kwargs: Any):
-        return self._loop.run_until_complete(self._conn.execute(*args, **kwargs))
-
-    def commit(self) -> None:
-        self._loop.run_until_complete(self._conn.commit())
-
-    def rollback(self) -> None:
-        self._loop.run_until_complete(self._conn.rollback())
-
-    def __getattr__(self, name: str):
-        attr = getattr(self._conn, name)
-        if callable(attr):
-
-            def wrapper(*args: Any, **kwargs: Any):
-                result = attr(*args, **kwargs)
-                if asyncio.iscoroutine(result):
-                    return self._loop.run_until_complete(result)
-                return result
-
-            return wrapper
-        return attr
-
-
 class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
-    """Одно соединение: sync `with` (тесты Хекслета) и `async with` (наш код)."""
+    """Sync `with` — psycopg (тесты Хекслета). `async with` — AsyncConnection (наш код)."""
 
     def __init__(self) -> None:
-        self._conn: AsyncConnection | None = None
         self._async_cm = None
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._owns_loop = False
+        self._async_conn: AsyncConnection | None = None
+        self._sync_conn: Any = None
 
-    def __enter__(self) -> _SyncConnProxy:
-        open_pool()
-        if _engine is None:
-            raise RuntimeError("pool is not open")
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            self._loop = asyncio.new_event_loop()
-            self._owns_loop = True
-            asyncio.set_event_loop(self._loop)
-        else:
-            raise RuntimeError("sync connection() inside running event loop")
-        self._async_cm = _engine.connect()
-        self._conn = self._loop.run_until_complete(self._async_cm.__aenter__())
-        return _SyncConnProxy(self._conn, self._loop)
+    def __enter__(self):
+        self._sync_conn = psycopg.connect(sync_database_url(settings.database_url))
+        return self._sync_conn
 
-    def __exit__(self, exc_type, exc, tb) -> bool | None:
-        assert self._loop is not None and self._async_cm is not None
+    def __exit__(self, exc_type, exc, tb) -> None:
+        assert self._sync_conn is not None
         try:
-            result = self._loop.run_until_complete(self._async_cm.__aexit__(exc_type, exc, tb))
+            if exc_type is None:
+                self._sync_conn.commit()
+            else:
+                self._sync_conn.rollback()
         finally:
-            if self._owns_loop:
-                self._loop.close()
-                asyncio.set_event_loop(None)
-            self._conn = None
-            self._async_cm = None
-            self._loop = None
-        return result
+            self._sync_conn.close()
+            self._sync_conn = None
 
     async def __aenter__(self) -> AsyncConnection:
         if _engine is None:
             raise RuntimeError("pool is not open")
         self._async_cm = _engine.connect()
-        self._conn = await self._async_cm.__aenter__()
-        return self._conn
+        self._async_conn = await self._async_cm.__aenter__()
+        return self._async_conn
 
     async def __aexit__(self, exc_type, exc, tb) -> bool | None:
         assert self._async_cm is not None
         try:
             return await self._async_cm.__aexit__(exc_type, exc, tb)
         finally:
-            self._conn = None
+            self._async_conn = None
             self._async_cm = None
 
 

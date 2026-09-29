@@ -1,13 +1,18 @@
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 
 from docx import Document
 
 from app.parsers.models import TextBlock
 
 
-def parse_docx(path: Path) -> list[TextBlock]:
+def parse_docx(path: Path | str | bytes | BinaryIO) -> list[TextBlock]:
     """Параграфы docx. Заголовок задаёт секцию, явный разрыв страницы увеличивает номер."""
-    document = Document(str(path))
+    if isinstance(path, bytes):
+        document = Document(BytesIO(path))
+    else:
+        document = Document(path)
     page = 1
     section = ""
     blocks: list[TextBlock] = []

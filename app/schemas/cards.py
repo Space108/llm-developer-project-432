@@ -42,8 +42,10 @@ class SecurityReport(BaseModel):
     def needs_review(self) -> bool:
         from app.core.config import settings
 
-        return len(self.suspicious_chunks) >= settings.suspicious_chunk_limit
+        return len(self.suspicious_chunks) > settings.suspicious_chunk_limit
 
+    def __bool__(self) -> bool:
+        return bool(self.masked or self.excluded or self.blocked or self.suspicious_chunks)
 
 class CardRules(BaseModel):
     title: str = Field(default="", max_length=TITLE_MAX_LENGTH)
