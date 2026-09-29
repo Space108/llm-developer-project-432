@@ -1,0 +1,13 @@
+.venv/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.env
+STATUS.md
+.cursor/
+data/uploads/*
+!data/uploads/.gitkeep
+data/reports/
+data/golden_cards.json
