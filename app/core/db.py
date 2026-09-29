@@ -105,6 +105,7 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
                     id text PRIMARY KEY,
                     filename text NOT NULL DEFAULT '',
                     content_hash text NOT NULL DEFAULT '',
+                    kind text NOT NULL DEFAULT '',
                     status text NOT NULL DEFAULT '',
                     error text,
                     path text NOT NULL DEFAULT '',
@@ -112,6 +113,9 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
                     updated_at timestamptz NOT NULL DEFAULT now()
                 )
                 """
+            )
+            cur.execute(
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT ''"
             )
             cur.execute(
                 """

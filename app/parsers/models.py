@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -7,6 +7,7 @@ class TextBlock:
     section: str
     text: str
     kind: str = "text"
+    rows: list[list[str]] = field(default_factory=list)
 
     @property
     def content(self) -> str:

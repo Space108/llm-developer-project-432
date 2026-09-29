@@ -174,9 +174,6 @@ async def run_pipeline(
         feedback = report.issues
     if draft is None:
         raise RuntimeError("pipeline produced no draft")
-    if status == "done" and draft.confidence < settings.confidence_threshold:
-        verdict = "awaiting_confirmation"
-        status = "awaiting_confirmation"
     return draft, attempts, verdict, status
 
 

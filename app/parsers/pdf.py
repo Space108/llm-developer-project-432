@@ -127,7 +127,8 @@ def _table_blocks(raw: bytes, text_blocks: list[TextBlock]) -> list[TextBlock]:
     with pdfplumber.open(BytesIO(raw)) as pdf:
         for index, page in enumerate(pdf.pages, start=1):
             for table in page.extract_tables() or []:
-                content = _format_table(table)
+                rows = _normalize_table_rows(table)
+                content = _format_table(rows)
                 if not content.strip():
                     continue
                 tables.append(
@@ -136,15 +137,20 @@ def _table_blocks(raw: bytes, text_blocks: list[TextBlock]) -> list[TextBlock]:
                         section=section_by_page.get(index, ""),
                         text=content,
                         kind="table",
+                        rows=rows,
                     )
                 )
     return tables
 
 
-def _format_table(table: list[list[str | None]]) -> str:
-    rows: list[str] = []
-    for row in table:
-        cells = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+def _normalize_table_rows(table: list[list[str | None]]) -> list[list[str]]:
+    return [[("" if cell is None else str(cell).strip()) for cell in row] for row in table]
+
+
+def _format_table(rows: list[list[str]]) -> str:
+    lines: list[str] = []
+    for row in rows:
+        cells = [cell for cell in row if cell]
         if cells:
-            rows.append(" | ".join(cells))
-    return "\n".join(rows)
+            lines.append(" | ".join(cells))
+    return "\n".join(lines)
