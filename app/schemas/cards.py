@@ -36,6 +36,13 @@ class SecurityReport(BaseModel):
     excluded: list[SecurityFinding] = Field(default_factory=list)
     blocked: bool = False
     block_reason: str | None = None
+    suspicious_chunks: list[str] = Field(default_factory=list)
+
+    @property
+    def needs_review(self) -> bool:
+        from app.core.config import settings
+
+        return len(self.suspicious_chunks) >= settings.suspicious_chunk_limit
 
 
 class CardRules(BaseModel):

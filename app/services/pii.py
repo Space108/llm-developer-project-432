@@ -14,6 +14,11 @@ class MaskResult:
     text: str
     hits: list[PiiHit] = field(default_factory=list)
 
+    def __iter__(self):
+        """Распаковка как в каркасе: cleaned, entities = mask_pii(...)."""
+        yield self.text
+        yield self.hits
+
 
 _PHONE_RE = re.compile(
     r"(?<!\d)(?:\+7|8)[\s\-]?(?:\(?\d{3}\)?[\s\-]?)?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}(?!\d)"

@@ -1,4 +1,6 @@
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 
 from pypdf import PdfReader
 
@@ -9,9 +11,12 @@ class PdfNoTextLayer(Exception):
     """Скан без текстового слоя."""
 
 
-def parse_pdf(path: Path) -> list[TextBlock]:
+def parse_pdf(path: Path | str | bytes | BinaryIO) -> list[TextBlock]:
     """Текст pdf постранично. Строка крупнее соседних задаёт секцию."""
-    reader = PdfReader(str(path))
+    if isinstance(path, bytes):
+        reader = PdfReader(BytesIO(path))
+    else:
+        reader = PdfReader(path)
     blocks: list[TextBlock] = []
     for index, page in enumerate(reader.pages, start=1):
         blocks.extend(_page_blocks(index, page))

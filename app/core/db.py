@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, AbstractContextManager
+from typing import Any
 
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
@@ -75,14 +76,93 @@ def pool():
     return _engine.pool
 
 
-@asynccontextmanager
-async def connection() -> AsyncIterator[AsyncConnection]:
+class _SyncConnProxy:
+    """Синхронная обёртка над AsyncConnection для тестов каркаса Хекслета."""
+
+    def __init__(self, conn: AsyncConnection, loop: asyncio.AbstractEventLoop) -> None:
+        self._conn = conn
+        self._loop = loop
+
+    def execute(self, *args: Any, **kwargs: Any):
+        return self._loop.run_until_complete(self._conn.execute(*args, **kwargs))
+
+    def commit(self) -> None:
+        self._loop.run_until_complete(self._conn.commit())
+
+    def rollback(self) -> None:
+        self._loop.run_until_complete(self._conn.rollback())
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._conn, name)
+        if callable(attr):
+
+            def wrapper(*args: Any, **kwargs: Any):
+                result = attr(*args, **kwargs)
+                if asyncio.iscoroutine(result):
+                    return self._loop.run_until_complete(result)
+                return result
+
+            return wrapper
+        return attr
+
+
+class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
+    """Одно соединение: sync `with` (тесты Хекслета) и `async with` (наш код)."""
+
+    def __init__(self) -> None:
+        self._conn: AsyncConnection | None = None
+        self._async_cm = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._owns_loop = False
+
+    def __enter__(self) -> _SyncConnProxy:
+        open_pool()
+        if _engine is None:
+            raise RuntimeError("pool is not open")
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = asyncio.new_event_loop()
+            self._owns_loop = True
+            asyncio.set_event_loop(self._loop)
+        else:
+            raise RuntimeError("sync connection() inside running event loop")
+        self._async_cm = _engine.connect()
+        self._conn = self._loop.run_until_complete(self._async_cm.__aenter__())
+        return _SyncConnProxy(self._conn, self._loop)
+
+    def __exit__(self, exc_type, exc, tb) -> bool | None:
+        assert self._loop is not None and self._async_cm is not None
+        try:
+            result = self._loop.run_until_complete(self._async_cm.__aexit__(exc_type, exc, tb))
+        finally:
+            if self._owns_loop:
+                self._loop.close()
+                asyncio.set_event_loop(None)
+            self._conn = None
+            self._async_cm = None
+            self._loop = None
+        return result
+
+    async def __aenter__(self) -> AsyncConnection:
+        if _engine is None:
+            raise RuntimeError("pool is not open")
+        self._async_cm = _engine.connect()
+        self._conn = await self._async_cm.__aenter__()
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool | None:
+        assert self._async_cm is not None
+        try:
+            return await self._async_cm.__aexit__(exc_type, exc, tb)
+        finally:
+            self._conn = None
+            self._async_cm = None
+
+
+def connection() -> _ConnectionCM:
     """Одно соединение из пула на операцию, затем оно возвращается."""
-    if _engine is None:
-        raise RuntimeError("pool is not open")
-    engine = _engine
-    async with engine.connect() as conn:
-        yield conn
+    return _ConnectionCM()
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:

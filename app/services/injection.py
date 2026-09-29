@@ -7,7 +7,13 @@ from app.llm.client import LlmClient, LlmError
 from app.llm.parse import parse_model_json
 
 
-class InjectionVerdict(BaseModel):
+class _InjectionVerdictSchema(BaseModel):
+    suspicious: bool
+    reason: str = ""
+
+
+@dataclass
+class InjectionVerdict:
     suspicious: bool
     reason: str = ""
 
@@ -43,9 +49,15 @@ def rule_scan(text: str) -> list[InjectionHit]:
     return hits
 
 
-def detect_injection_regex(text: str) -> bool:
-    """Имя из каркаса: правила по тексту, без вызова модели."""
-    return bool(rule_scan(text))
+def detect_injection_regex(text: str) -> InjectionVerdict:
+    """Правила по тексту, без вызова модели. Имя из каркаса Хекслета."""
+    hits = rule_scan(text)
+    if not hits:
+        return InjectionVerdict(suspicious=False)
+    return InjectionVerdict(
+        suspicious=True,
+        reason=",".join(item.rule for item in hits),
+    )
 
 
 _HARD_RULES = frozenset(
@@ -72,13 +84,19 @@ def model_scan(text: str, rules: list[InjectionHit] | None = None) -> InjectionV
     user = text
     if marked:
         user = f"Правила уже пометили: {marked}.\n\nФрагмент:\n{text}"
-    schema = InjectionVerdict.model_json_schema()
+    schema = _InjectionVerdictSchema.model_json_schema()
     try:
         raw = LlmClient().complete(system, user, schema=schema, cheap=True)
         data = parse_model_json(raw)
-        return InjectionVerdict.model_validate(data)
+        parsed = _InjectionVerdictSchema.model_validate(data)
+        return InjectionVerdict(suspicious=parsed.suspicious, reason=parsed.reason)
     except (LlmError, Exception) as exc:
         return InjectionVerdict(suspicious=True, reason=f"детектор недоступен: {exc}")
+
+
+async def detect_injection_llm(text: str) -> InjectionVerdict:
+    """Имя из каркаса Хекслета. Дешёвая модель, fail-closed."""
+    return model_scan(text)
 
 
 def examine_fragment(text: str) -> tuple[bool, str]:

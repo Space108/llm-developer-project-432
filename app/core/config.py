@@ -36,5 +36,15 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    @property
+    def embed_dim(self) -> int:
+        """Имя из каркаса Хекслета."""
+        return self.embedding_dimensions
+
+    @property
+    def suspicious_chunk_limit(self) -> int:
+        """Имя из каркаса Хекслета."""
+        return self.injection_block_threshold
+
 
 settings = Settings()

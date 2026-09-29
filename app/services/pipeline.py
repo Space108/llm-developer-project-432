@@ -182,6 +182,11 @@ def read_model(system: str, user: str, model: type[T], *, cheap: bool = False) -
     raise ModelResponseError(str(caught)) from caught
 
 
+async def run_agent(agent, prompt: str) -> str:
+    """Точка вызова модели для тестов Хекслета."""
+    return LlmClient().complete(str(agent), prompt)
+
+
 def repair_field(data: dict, field: str, model: type[T], schema: dict) -> T:
     """Одно поле. Остальной черновик, включая описание, остаётся как был."""
     get_logger().info("model_call", operation="repair_field", field=field)
