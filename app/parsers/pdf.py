@@ -5,12 +5,18 @@ from pypdf import PdfReader
 from app.parsers.models import TextBlock
 
 
+class PdfNoTextLayer(Exception):
+    """Скан без текстового слоя."""
+
+
 def parse_pdf(path: Path) -> list[TextBlock]:
     """Текст pdf постранично. Строка крупнее соседних задаёт секцию."""
     reader = PdfReader(str(path))
     blocks: list[TextBlock] = []
     for index, page in enumerate(reader.pages, start=1):
         blocks.extend(_page_blocks(index, page))
+    if not any((block.text or "").strip() for block in blocks):
+        raise PdfNoTextLayer("нет текстового слоя")
     return blocks
 
 

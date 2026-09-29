@@ -83,6 +83,9 @@ def inn_checksum_ok(digits: str) -> bool:
     return False
 
 
+_inn_checksum = inn_checksum_ok
+
+
 def luhn_ok(digits: str) -> bool:
     total = 0
     reverse = digits[::-1]
