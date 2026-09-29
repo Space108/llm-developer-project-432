@@ -22,11 +22,9 @@ class CardValidationError(ValueError):
 
 async def run_agent(agent, prompt: str) -> str:
     """Точка вызова модели для тестов Хекслета."""
-    from app.llm import client as llm_client
+    from app.llm.client import run_agent as llm_run_agent
 
-    llm_client.setup_llm()
-    result = await llm_client.Runner.run(agent, prompt)
-    return getattr(result, "final_output", "") or str(result)
+    return await llm_run_agent(agent, prompt)
 
 
 async def validate_or_retry(prompt: str, *, max_attempts: int = 3) -> CardDraft:

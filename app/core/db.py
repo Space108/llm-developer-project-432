@@ -101,6 +101,20 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS documents (
+                    id text PRIMARY KEY,
+                    filename text NOT NULL DEFAULT '',
+                    content_hash text NOT NULL DEFAULT '',
+                    status text NOT NULL DEFAULT '',
+                    error text,
+                    path text NOT NULL DEFAULT '',
+                    created_at timestamptz NOT NULL DEFAULT now(),
+                    updated_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS chunks (
                     id text PRIMARY KEY,
                     doc_id text NOT NULL,

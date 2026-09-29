@@ -1,7 +1,9 @@
+import asyncio
 import random
 import time
 
 import httpx
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from app.core.config import settings
 from app.core.context import current_job_id, current_request_id
@@ -28,6 +30,35 @@ class Runner:
             final_output = ""
 
         return _Result()
+
+
+def _agent_retryable(exc: Exception) -> bool:
+    """Ретраим только транспортные и серверные ошибки: 429, 5xx, таймаут, сеть."""
+    if isinstance(exc, (APIConnectionError, APITimeoutError, TimeoutError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    return False
+
+
+async def run_agent(agent, prompt: str):
+    """Запустить агента с ретраями: экспоненциальная задержка + jitter."""
+    setup_llm()
+    for attempt in range(1, settings.llm_max_retries + 1):
+        try:
+            result = await asyncio.wait_for(
+                Runner.run(agent, prompt),
+                timeout=settings.llm_timeout_seconds,
+            )
+            return getattr(result, "final_output", "") or str(result)
+        except Exception as exc:
+            if attempt >= settings.llm_max_retries or not _agent_retryable(exc):
+                get_logger().error("llm_call_failed", attempt=attempt, error=repr(exc))
+                raise
+            delay = min(2**attempt * 0.5, 8.0) * (1 + random.random() * 0.25)
+            get_logger().warning("llm_call_retry", attempt=attempt, delay=round(delay, 2))
+            await asyncio.sleep(delay)
+    raise RuntimeError("llm retries exhausted")
 
 
 class LlmClient:
@@ -143,4 +174,8 @@ def _retryable(exc: Exception) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code
         return code == 429 or code >= 500
+    if isinstance(exc, (APIConnectionError, APITimeoutError, TimeoutError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
     return False

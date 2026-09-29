@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
 
+import pdfplumber
 from pypdf import PdfReader
 
 from app.parsers.models import TextBlock
@@ -12,17 +13,27 @@ class PdfNoTextLayer(Exception):
 
 
 def parse_pdf(path: Path | str | bytes | BinaryIO) -> list[TextBlock]:
-    """Текст pdf постранично. Строка крупнее соседних задаёт секцию."""
-    if isinstance(path, bytes):
-        reader = PdfReader(BytesIO(path))
-    else:
-        reader = PdfReader(path)
+    """Текст pdf постранично. Таблицы — отдельные блоки kind=table."""
+    raw = _read_bytes(path)
+    reader = PdfReader(BytesIO(raw))
     blocks: list[TextBlock] = []
     for index, page in enumerate(reader.pages, start=1):
         blocks.extend(_page_blocks(index, page))
+    blocks.extend(_table_blocks(raw, blocks))
     if not any((block.text or "").strip() for block in blocks):
         raise PdfNoTextLayer("нет текстового слоя")
     return blocks
+
+
+def _read_bytes(path: Path | str | bytes | BinaryIO) -> bytes:
+    if isinstance(path, bytes):
+        return path
+    if hasattr(path, "read"):
+        data = path.read()
+        if isinstance(data, str):
+            return data.encode("utf-8")
+        return bytes(data)
+    return Path(path).read_bytes()
 
 
 def _page_blocks(page_number: int, page) -> list[TextBlock]:
@@ -104,3 +115,36 @@ def _section_blocks(page_number: int, lines: list[tuple[str, float]]) -> list[Te
         TextBlock(page=page_number, section=name, text="\n".join(parts))
         for name, parts in zip(names, chunks, strict=True)
     ]
+
+
+def _table_blocks(raw: bytes, text_blocks: list[TextBlock]) -> list[TextBlock]:
+    """Таблицы через pdfplumber: одна таблица — один блок kind=table."""
+    section_by_page: dict[int, str] = {}
+    for block in text_blocks:
+        if block.section:
+            section_by_page[block.page] = block.section
+    tables: list[TextBlock] = []
+    with pdfplumber.open(BytesIO(raw)) as pdf:
+        for index, page in enumerate(pdf.pages, start=1):
+            for table in page.extract_tables() or []:
+                content = _format_table(table)
+                if not content.strip():
+                    continue
+                tables.append(
+                    TextBlock(
+                        page=index,
+                        section=section_by_page.get(index, ""),
+                        text=content,
+                        kind="table",
+                    )
+                )
+    return tables
+
+
+def _format_table(table: list[list[str | None]]) -> str:
+    rows: list[str] = []
+    for row in table:
+        cells = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+        if cells:
+            rows.append(" | ".join(cells))
+    return "\n".join(rows)
