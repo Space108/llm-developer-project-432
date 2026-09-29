@@ -1,5 +1,5 @@
 [project]
-name = "llm-developer-project-432"
+name = "hexlet-code"
 version = "0.1.0"
 description = "ИИ-генератор карточки товара"
 requires-python = ">=3.11"
