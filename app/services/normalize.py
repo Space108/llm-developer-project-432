@@ -35,18 +35,34 @@ def normalize_blocks(blocks: list[TextBlock]) -> list[TextBlock]:
     headers = _repeating_lines(cleaned)
     result: list[TextBlock] = []
     for block in cleaned:
-        lines = [line for line in block.text.splitlines() if line not in headers]
+        lines = [
+            line
+            for line in block.text.splitlines()
+            if line not in headers and not _is_page_footer(line)
+        ]
         text = _join_hyphens("\n".join(lines))
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r" *\n *", "\n", text).strip()
-        result.append(TextBlock(page=block.page, section=block.section, text=text))
+        result.append(
+            TextBlock(page=block.page, section=block.section, text=text, kind=block.kind)
+        )
     return result
+
+
+def _is_page_footer(line: str) -> bool:
+    """Колонтитул вида «… — стр. N»."""
+    return bool(re.search(r"—\s*стр\.\s*\d+\s*$", line, flags=re.IGNORECASE))
 
 
 def _clean_block(block: TextBlock) -> TextBlock:
     lines = [_clean_line(line) for line in block.text.splitlines()]
     lines = [line for line in lines if line]
-    return TextBlock(page=block.page, section=block.section, text="\n".join(lines))
+    return TextBlock(
+        page=block.page,
+        section=block.section,
+        text="\n".join(lines),
+        kind=block.kind,
+    )
 
 
 def _clean_line(line: str) -> str:

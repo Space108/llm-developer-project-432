@@ -31,7 +31,7 @@ async def extract_activity(
     request_id: str = "",
 ) -> str:
     _bind_trace(job_id, request_id)
-    facts = await asyncio.to_thread(pipeline.extract, supplier_text)
+    facts = await asyncio.to_thread(pipeline.extract_sync, supplier_text)
     return facts.model_dump_json()
 
 

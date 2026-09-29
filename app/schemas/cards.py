@@ -7,8 +7,10 @@ TITLE_MAX_LENGTH = 60
 
 class SourceRef(BaseModel):
     chunk_id: str
+    doc_id: str = ""
     page: int | None = None
     section: str | None = None
+    score: float | None = None
 
 
 class SeoBlock(BaseModel):

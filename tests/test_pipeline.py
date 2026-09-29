@@ -40,7 +40,7 @@ def _patch(monkeypatch, script: list) -> None:
 
 def test_pipeline_approves_on_first_pass(monkeypatch) -> None:
     _patch(monkeypatch, [_facts(), _draft(), CritiqueReport(verdict="approve")])
-    draft, attempts, verdict = pipeline.run_pipeline("текст")
+    draft, attempts, verdict = pipeline.run_pipeline_sync("текст")
     assert verdict == "approved"
     assert attempts == 1
     assert draft.title == "Блендер 800 Вт"
@@ -57,7 +57,7 @@ def test_pipeline_accepts_after_revision(monkeypatch) -> None:
             CritiqueReport(verdict="approve"),
         ],
     )
-    draft, attempts, verdict = pipeline.run_pipeline("текст")
+    draft, attempts, verdict = pipeline.run_pipeline_sync("текст")
     assert verdict == "approved"
     assert attempts == 2
     assert draft.title == "Блендер 800 Вт"
@@ -69,7 +69,7 @@ def test_pipeline_stops_after_three_rounds(monkeypatch) -> None:
         script.append(_draft())
         script.append(CritiqueReport(verdict="regenerate", issues=["вода"]))
     _patch(monkeypatch, script)
-    draft, attempts, verdict = pipeline.run_pipeline("текст", max_attempts=3)
+    draft, attempts, verdict = pipeline.run_pipeline_sync("текст", max_attempts=3)
     assert verdict == "rejected"
     assert attempts == 3
     assert draft.title == "Блендер 800 Вт"
@@ -157,7 +157,7 @@ def test_sparse_text_waits_for_a_human(monkeypatch) -> None:
         confidence=0.2,
     )
     _patch(monkeypatch, [facts, draft, CritiqueReport(verdict="approve")])
-    card, _attempts, verdict = pipeline.run_pipeline("мало данных")
+    card, _attempts, verdict = pipeline.run_pipeline_sync("мало данных")
     assert card.missing_fields
     assert card.confidence < settings.confidence_threshold
     assert verdict == "awaiting_confirmation"

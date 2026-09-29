@@ -14,6 +14,11 @@ class LlmError(RuntimeError):
     pass
 
 
+def setup_llm() -> None:
+    """Имя из каркаса Хекслета. Точка для патча в тестах."""
+    return None
+
+
 class LlmClient:
     """Вызов модели за одной границей: таймаут, ретраи, OpenAI-совместимый API."""
 

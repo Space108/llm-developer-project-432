@@ -1,4 +1,6 @@
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 
 from openpyxl import load_workbook
 
@@ -8,9 +10,14 @@ _ARTICLE_HEADERS = {"артикул", "article", "sku"}
 _BRAND_HEADERS = {"бренд", "brand"}
 
 
-def parse_xlsx(path: Path) -> list[TableRow]:
+def parse_xlsx(path: Path | str | bytes | BinaryIO) -> list[TableRow]:
     """Первая строка листа — заголовки. Строка становится «артикул: параметр значение»."""
-    book = load_workbook(path, read_only=True, data_only=True)
+    source: Path | BytesIO | BinaryIO
+    if isinstance(path, bytes):
+        source = BytesIO(path)
+    else:
+        source = path
+    book = load_workbook(source, read_only=True, data_only=True)
     rows: list[TableRow] = []
     try:
         for sheet_index, sheet in enumerate(book.worksheets, start=1):

@@ -6,6 +6,7 @@ class TextBlock:
     page: int
     section: str
     text: str
+    kind: str = "text"
 
     @property
     def content(self) -> str:

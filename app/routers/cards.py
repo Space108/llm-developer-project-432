@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.schemas.cards import CardDraft, SupplierText
-from app.services.pipeline import run_pipeline
+from app.services.pipeline import run_pipeline_sync as run_pipeline
 
 router = APIRouter()
 

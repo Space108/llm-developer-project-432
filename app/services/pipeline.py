@@ -21,8 +21,16 @@ HEAL_ATTEMPTS = 2
 T = TypeVar("T", bound=BaseModel)
 
 
-def extract(supplier_text: str) -> SupplierFacts:
+def extract_sync(supplier_text: str) -> SupplierFacts:
+    """Синхронный путь для Temporal и локальных тестов."""
     return read_model(extractor_prompt(), supplier_text, SupplierFacts)
+
+
+async def extract(supplier_text: str) -> SupplierFacts:
+    """Каркас Хекслета: extract зовёт run_agent."""
+    raw = await run_agent("extractor", supplier_text)
+    data = parse_model_json(raw)
+    return SupplierFacts.model_validate(data)
 
 
 def generate(facts: SupplierFacts, feedback: list[str] | None = None) -> CardDraft:
@@ -131,9 +139,50 @@ def critique(facts: SupplierFacts, draft: CardDraft) -> CritiqueReport:
     return read_model(critic_prompt(), prompt, CritiqueReport, cheap=True)
 
 
-def run_pipeline(supplier_text: str, max_attempts: int = 3) -> tuple[CardDraft, int, str]:
-    """Извлечение, затем не больше трёх кругов генерации и проверки."""
-    facts = extract(supplier_text)
+async def run_pipeline(
+    supplier_text: str,
+    max_attempts: int = 3,
+) -> tuple[CardDraft, int, str, str]:
+    """Извлечение и круги генерации. Каркас Хекслета: async + 4 значения."""
+    from app.services import structured as structured_mod
+
+    facts = await extract(supplier_text)
+    feedback: list[str] | None = None
+    draft: CardDraft | None = None
+    verdict = "rejected"
+    status = "rejected"
+    attempts = 0
+    for _ in range(max_attempts):
+        attempts += 1
+        prompt = "Факты о товаре:\n" + facts.model_dump_json(indent=2)
+        if feedback:
+            lines = "\n".join(f"- {item}" for item in feedback)
+            prompt += "\n\nЗамечания критика, учти:\n" + lines
+        draft = await structured_mod.validate_or_retry(prompt)
+        critique_prompt = (
+            "Факты о товаре:\n"
+            + facts.model_dump_json(indent=2)
+            + "\n\nЧерновик карточки для проверки:\n"
+            + draft.model_dump_json(indent=2)
+        )
+        raw = await run_agent("critique", critique_prompt)
+        report = CritiqueReport.model_validate(parse_model_json(raw))
+        if report.verdict == "approve":
+            verdict = "approved"
+            status = "approved"
+            break
+        feedback = report.issues
+    if draft is None:
+        raise RuntimeError("pipeline produced no draft")
+    if verdict == "approved" and draft.confidence < settings.confidence_threshold:
+        verdict = "awaiting_confirmation"
+        status = "awaiting_confirmation"
+    return draft, attempts, verdict, status
+
+
+def run_pipeline_sync(supplier_text: str, max_attempts: int = 3) -> tuple[CardDraft, int, str]:
+    """Синхронный путь для API и старых тестов."""
+    facts = extract_sync(supplier_text)
     feedback: list[str] | None = None
     draft: CardDraft | None = None
     verdict = "rejected"

@@ -82,7 +82,17 @@ async def _guard_chunk_dicts(
                 SecurityFinding(kind=item.kind, label=item.label, fragment_id=chunk_id or None)
             )
         try:
-            verdict = await detect_injection_llm(masked.text)
+            regex = injection_mod.detect_injection_regex(masked.text)
+            if regex.suspicious:
+                try:
+                    verdict = await detect_injection_llm(masked.text)
+                except Exception as exc:
+                    verdict = injection_mod.InjectionVerdict(
+                        suspicious=True,
+                        reason=f"детектор недоступен: {exc}",
+                    )
+            else:
+                verdict = injection_mod.InjectionVerdict(suspicious=False)
         except Exception as exc:
             verdict = injection_mod.InjectionVerdict(
                 suspicious=True,

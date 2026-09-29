@@ -1,3 +1,4 @@
+from app.core.config import settings
 from app.parsers.models import FragmentDraft, TableRow, TextBlock
 
 
@@ -26,7 +27,37 @@ def chunk_text(text: str, size: int, overlap: int) -> list[str]:
     return pieces
 
 
-def chunk_blocks(blocks: list[TextBlock], size: int, overlap: int) -> list[FragmentDraft]:
+def chunk_blocks(
+    blocks: list[TextBlock],
+    size_or_doc: int | str,
+    overlap: int | None = None,
+) -> list[FragmentDraft] | list[dict]:
+    """Резка блоков. Каркас Хекслета: chunk_blocks(blocks, doc_id)."""
+    if isinstance(size_or_doc, str):
+        doc_id = size_or_doc
+        size = settings.chunk_size
+        use_overlap = settings.chunk_overlap if overlap is None else overlap
+        drafts = _chunk_to_drafts(blocks, size, use_overlap)
+        return [
+            {
+                "chunk_id": f"{doc_id}:{index}",
+                "text": item.text,
+                "metadata": {
+                    "doc_id": doc_id,
+                    "page": item.page,
+                    "section": item.section,
+                    "kind": "text",
+                },
+            }
+            for index, item in enumerate(drafts)
+        ]
+    size = size_or_doc
+    if overlap is None:
+        raise TypeError("chunk_blocks() missing 1 required positional argument: 'overlap'")
+    return _chunk_to_drafts(blocks, size, overlap)
+
+
+def _chunk_to_drafts(blocks: list[TextBlock], size: int, overlap: int) -> list[FragmentDraft]:
     fragments: list[FragmentDraft] = []
     for block in blocks:
         for piece in chunk_text(block.text, size, overlap):
