@@ -3,6 +3,7 @@
 from app.services.injection import (
     InjectionHit,
     InjectionVerdict,
+    detect_injection_regex,
     examine_fragment,
     model_scan,
     rule_scan,
@@ -11,6 +12,7 @@ from app.services.injection import (
 __all__ = [
     "InjectionHit",
     "InjectionVerdict",
+    "detect_injection_regex",
     "examine_fragment",
     "model_scan",
     "rule_scan",

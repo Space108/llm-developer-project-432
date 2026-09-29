@@ -43,6 +43,11 @@ def rule_scan(text: str) -> list[InjectionHit]:
     return hits
 
 
+def detect_injection_regex(text: str) -> bool:
+    """Имя из каркаса: правила по тексту, без вызова модели."""
+    return bool(rule_scan(text))
+
+
 _HARD_RULES = frozenset(
     {
         "ignore_instructions",

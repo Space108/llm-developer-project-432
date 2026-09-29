@@ -13,6 +13,22 @@ _LIGATURES = str.maketrans(
 )
 
 
+def clean_text(text: str) -> str:
+    """Лигатуры, неразрывные пробелы, склейка переносов, лишние пробелы."""
+    lines = [_clean_line(line) for line in text.splitlines()]
+    lines = [line for line in lines if line]
+    body = _join_hyphens("\n".join(lines))
+    body = re.sub(r"[ \t]+", " ", body)
+    return re.sub(r" *\n *", "\n", body).strip()
+
+
+def normalize(payload: str | list[TextBlock]) -> str | list[TextBlock]:
+    """Имя из каркаса: строка или список блоков."""
+    if isinstance(payload, str):
+        return clean_text(payload)
+    return normalize_blocks(payload)
+
+
 def normalize_blocks(blocks: list[TextBlock]) -> list[TextBlock]:
     """Колонтитулы, переносы через дефис, лигатуры и лишние пробелы."""
     cleaned = [_clean_block(block) for block in blocks]
