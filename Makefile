@@ -1,4 +1,7 @@
-.PHONY: temporal-worker index-fragments metrics metrics-all
+.PHONY: setup temporal-worker index-fragments metrics metrics-all
+
+setup:
+	uv sync --frozen --extra dev
 
 temporal-worker:
 	python -m app.temporal.worker
