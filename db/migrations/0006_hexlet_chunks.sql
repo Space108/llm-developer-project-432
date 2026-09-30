@@ -1,8 +1,10 @@
 CREATE TABLE chunks (
     id text PRIMARY KEY,
     doc_id text NOT NULL,
+    ordinal integer NOT NULL DEFAULT 0,
+    text text NOT NULL DEFAULT '',
     content text NOT NULL DEFAULT '',
-    embedding vector(768),
+    embedding vector,
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
