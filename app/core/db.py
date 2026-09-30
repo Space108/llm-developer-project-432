@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
+from contextvars import ContextVar
 from typing import Any
 
 import psycopg
@@ -17,6 +18,13 @@ from app.core.config import settings
 _engine: AsyncEngine | None = None
 session_factory: async_sessionmaker[AsyncSession] | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
+_sync_stack: ContextVar[tuple[Any, ...]] = ContextVar("sync_stack", default=())
+
+
+def current_sync_connection():
+    """Открытое sync-соединение фикстуры. Поиск видит её незакоммиченные строки."""
+    stack = _sync_stack.get()
+    return stack[-1] if stack else None
 
 
 def remember_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -94,6 +102,7 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
         self._async_cm = None
         self._async_conn: AsyncConnection | None = None
         self._sync_conn: Any = None
+        self._ctx_token = None
 
     def __enter__(self):
         self._sync_conn = psycopg.connect(sync_database_url(settings.database_url))
@@ -143,6 +152,7 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
                 "CREATE INDEX IF NOT EXISTS chunks_doc_id_idx ON chunks (doc_id)"
             )
         self._sync_conn.commit()
+        self._ctx_token = _sync_stack.set(_sync_stack.get() + (self._sync_conn,))
         return self._sync_conn
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -153,6 +163,9 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
             else:
                 self._sync_conn.rollback()
         finally:
+            if self._ctx_token is not None:
+                _sync_stack.reset(self._ctx_token)
+                self._ctx_token = None
             self._sync_conn.close()
             self._sync_conn = None
 
