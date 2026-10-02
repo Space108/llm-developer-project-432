@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     embedding_query_prefix: str = "task: search result | query: "
     embedding_document_prefix: str = "title: none | text: "
     embedding_batch_size: int = 32
-    relevance_threshold: float = 0.47
+    relevance_threshold: float = 0.40
     rrf_k: int = 60
     search_limit: int = 10
     context_size_limit: int = 12000

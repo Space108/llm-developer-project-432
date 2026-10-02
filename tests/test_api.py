@@ -2,6 +2,7 @@ import pytest
 from app.repositories.documents import documents
 from app.repositories.jobs import jobs
 from fastapi.testclient import TestClient
+from temporalio.service import RPCError, RPCStatusCode
 
 
 def setup_function() -> None:
@@ -127,6 +128,62 @@ def test_unknown_document(client: TestClient, monkeypatch: pytest.MonkeyPatch) -
         json={"document_ids": ["missing"], "product_hint": ""},
     )
     assert response.status_code == 404
+
+
+def _signal_client(monkeypatch: pytest.MonkeyPatch, failure: Exception | None) -> list[str]:
+    sent: list[str] = []
+
+    class _Handle:
+        def __init__(self, workflow_id: str) -> None:
+            self._workflow_id = workflow_id
+
+        async def signal(self, _signal) -> None:
+            if failure is not None:
+                raise failure
+            sent.append(self._workflow_id)
+
+    class _Client:
+        def get_workflow_handle(self, workflow_id: str) -> _Handle:
+            return _Handle(workflow_id)
+
+    async def fake_connect():
+        return _Client()
+
+    monkeypatch.setattr("app.routers.jobs.connect", fake_connect)
+    return sent
+
+
+@pytest.mark.parametrize("action", ["approve", "reject"])
+def test_signal_reaches_the_workflow(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    sent = _signal_client(monkeypatch, None)
+    response = client.post(f"/jobs/job-1/{action}")
+    assert response.status_code == 200
+    assert response.json() == {"id": "job-1", "signal": action}
+    assert sent == ["job-1"]
+
+
+@pytest.mark.parametrize("action", ["approve", "reject"])
+def test_signal_for_unknown_job_is_not_found(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    _signal_client(monkeypatch, RPCError("workflow not found", RPCStatusCode.NOT_FOUND, b""))
+    response = client.post(f"/jobs/missing/{action}")
+    assert response.status_code == 404
+
+
+def test_signal_other_rpc_error_is_not_hidden(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _signal_client(monkeypatch, RPCError("down", RPCStatusCode.UNAVAILABLE, b""))
+    with pytest.raises(RPCError):
+        client.post("/jobs/job-1/approve")
 
 
 def _skip_storage(monkeypatch: pytest.MonkeyPatch) -> None:

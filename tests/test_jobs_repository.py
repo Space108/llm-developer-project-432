@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import pytest
@@ -37,6 +38,22 @@ async def test_repository_keeps_one_job_for_the_same_key() -> None:
         assert loaded is not None
         assert loaded["status"] == "generating"
         assert loaded["attempts"] == 1
+    finally:
+        await close_pool()
+
+
+async def test_parallel_requests_with_the_same_key_make_one_job() -> None:
+    key = f"step3-race-{uuid.uuid4().hex}"
+    open_pool()
+    try:
+        await _postgres_or_skip()
+        await apply_migrations()
+        results = await asyncio.gather(*(insert_job("текст блендера", key) for _ in range(10)))
+        assert len({job_id for job_id, _created in results}) == 1
+        assert sum(1 for _job_id, created in results if created) == 1
+        async with connection() as conn:
+            await conn.execute(text("DELETE FROM jobs WHERE idempotency_key = :key"), {"key": key})
+            await conn.commit()
     finally:
         await close_pool()
 

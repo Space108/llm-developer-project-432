@@ -5,17 +5,23 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import text
-
 from app.core.config import settings
 from app.core.context import bind_ids
-from app.core.db import close_pool, connection, open_pool, remember_loop
+from app.core.db import close_pool, open_pool, remember_loop
 from app.core.logging import bind_log, configure_logging, get_logger
 from app.core.migrate import apply_migrations
-from app.repositories.documents import insert_document, load_document
+from app.llm.parse import ModelResponseError
+from app.repositories.documents import (
+    find_document_id_by_filename,
+    insert_document,
+    load_document,
+)
 from app.services.metrics import score_card
 from app.services.pipeline import run_context_pipeline
 from app.services.retrieve import retrieve_context
+
+# Как GENERATE_RETRY в процессе: один неудачный ответ модели не должен ронять весь прогон.
+EVAL_ATTEMPTS = 3
 
 
 def main() -> int:
@@ -38,7 +44,7 @@ async def _run(golden_path: Path, *, full: bool) -> None:
         names = list(documents) if full else list(golden.get("eval_defaults") or documents)
         rows: list[dict] = []
         for name in names:
-            row = await _eval_one(name, documents[name])
+            row = await _eval_with_retry(name, documents[name])
             rows.append(row)
             print(
                 f"{name}\tchars={row['characteristics']:.2f}\t"
@@ -65,6 +71,27 @@ async def _run(golden_path: Path, *, full: bool) -> None:
         print(f"report\t{path}")
     finally:
         await close_pool()
+
+
+async def _eval_with_retry(
+    filename: str, expected: dict, *, attempts: int = EVAL_ATTEMPTS
+) -> dict:
+    """Карточка по документу. Неверный формат ответа повторяем, последнюю ошибку не прячем."""
+    last: ModelResponseError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await _eval_one(filename, expected)
+        except ModelResponseError as exc:
+            last = exc
+            get_logger().warning(
+                "metrics_retry",
+                filename=filename,
+                attempt=attempt,
+                attempts=attempts,
+                error=str(exc)[:200],
+            )
+    assert last is not None
+    raise last
 
 
 async def _eval_one(filename: str, expected: dict) -> dict:
@@ -96,14 +123,9 @@ async def _eval_one(filename: str, expected: dict) -> dict:
 
 
 async def _ensure_document(filename: str) -> str:
-    async with connection() as conn:
-        result = await conn.execute(
-            text("SELECT id, status FROM documents WHERE filename = :name LIMIT 1"),
-            {"name": filename},
-        )
-        row = result.mappings().first()
-    if row is not None:
-        return str(row["id"])
+    existing = await find_document_id_by_filename(filename)
+    if existing is not None:
+        return existing
     path = Path("data") / filename
     if not path.exists():
         raise FileNotFoundError(f"нет файла {path}")
@@ -120,8 +142,6 @@ async def _ensure_document(filename: str) -> str:
     stored = await load_document(document_id)
     if stored is None:
         raise RuntimeError(f"документ {filename} не записался")
-    if stored["status"] != "проиндексирован":
-        pass
     return document_id
 
 

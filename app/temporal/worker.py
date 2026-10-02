@@ -5,6 +5,7 @@ from temporalio.worker import Worker
 
 from app.core.config import settings
 from app.core.db import close_pool, open_pool
+from app.core.logging import configure_logging
 from app.temporal.activities import (
     critique_activity,
     critique_context_activity,
@@ -25,6 +26,7 @@ from app.temporal.workflows import CardWorkflow, DocumentWorkflow
 
 
 async def main() -> None:
+    configure_logging()
     open_pool()
     from app.core.db import remember_loop
 

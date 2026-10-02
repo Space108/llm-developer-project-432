@@ -1,4 +1,4 @@
-CREATE TABLE chunks (
+CREATE TABLE IF NOT EXISTS chunks (
     id text PRIMARY KEY,
     doc_id text NOT NULL,
     ordinal integer NOT NULL DEFAULT 0,
@@ -8,4 +8,4 @@ CREATE TABLE chunks (
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX chunks_doc_id_idx ON chunks (doc_id);
+CREATE INDEX IF NOT EXISTS chunks_doc_id_idx ON chunks (doc_id);

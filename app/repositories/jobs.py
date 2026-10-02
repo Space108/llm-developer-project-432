@@ -73,23 +73,33 @@ async def insert_generation_job(document_ids: list[str], product_hint: str) -> s
     return job_id
 
 
+async def _job_id_by_key(conn, idempotency_key: str) -> str | None:
+    found = await conn.execute(
+        text("SELECT id FROM jobs WHERE idempotency_key = :key"),
+        {"key": idempotency_key},
+    )
+    row = found.first()
+    return None if row is None else str(row[0])
+
+
 async def insert_job(supplier_text: str, idempotency_key: str | None) -> tuple[str, bool]:
-    """Новая строка или уже существующая по ключу идемпотентности."""
+    """Новая строка или уже существующая по ключу идемпотентности.
+
+    Два одновременных запроса с одним ключом дают одну задачу: проигравший получает её id.
+    """
     async with connection() as conn:
         if idempotency_key:
-            found = await conn.execute(
-                text("SELECT id FROM jobs WHERE idempotency_key = :key"),
-                {"key": idempotency_key},
-            )
-            row = found.first()
-            if row is not None:
-                return str(row[0]), False
+            existing = await _job_id_by_key(conn, idempotency_key)
+            if existing is not None:
+                return existing, False
         job_id = uuid.uuid4().hex[:12]
-        await conn.execute(
+        inserted = await conn.execute(
             text(
                 """
                 INSERT INTO jobs (id, idempotency_key, payload)
                 VALUES (:id, :key, CAST(:payload AS jsonb))
+                ON CONFLICT (idempotency_key) DO NOTHING
+                RETURNING id
                 """
             ),
             {
@@ -98,8 +108,15 @@ async def insert_job(supplier_text: str, idempotency_key: str | None) -> tuple[s
                 "payload": json.dumps({"supplier_text": supplier_text}, ensure_ascii=False),
             },
         )
+        created = inserted.first() is not None
         await conn.commit()
-        return job_id, True
+        if created:
+            return job_id, True
+        if idempotency_key:
+            existing = await _job_id_by_key(conn, idempotency_key)
+            if existing is not None:
+                return existing, False
+        raise RuntimeError("задача не создана и не найдена по ключу идемпотентности")
 
 
 async def update_job_status(

@@ -55,10 +55,10 @@ def _parse_to_hexlet_chunks(
     kind = fmt.lower().lstrip(".")
     if kind == "pdf":
         blocks = normalize_blocks(parse_pdf(path))
-        return chunk_blocks(blocks, doc_id)  # type: ignore[return-value]
+        return chunk_blocks(blocks, doc_id)
     if kind == "docx":
         blocks = normalize_blocks(parse_docx(path))
-        return chunk_blocks(blocks, doc_id)  # type: ignore[return-value]
+        return chunk_blocks(blocks, doc_id)
     if kind == "xlsx":
         rows = parse_xlsx(path)
         return [

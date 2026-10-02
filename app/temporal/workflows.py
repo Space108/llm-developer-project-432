@@ -165,6 +165,7 @@ class CardWorkflow:
         else:
             feedback: list[str] | None = None
             ids_json = json.dumps(context["ids"], ensure_ascii=False)
+            pending_errors: list[str] = []
             for _attempt in range(1, max_attempts + 1):
                 await self._write_status(job_id, "генерация", bump_attempts=True)
                 feedback_json = json.dumps(feedback, ensure_ascii=False) if feedback else None
@@ -182,6 +183,7 @@ class CardWorkflow:
                     retry_policy=STATUS_RETRY,
                 )
                 errors = json.loads(errors_json)
+                pending_errors = errors
                 if errors:
                     citation_failures += 1
                     if citation_failures >= 2:
@@ -217,7 +219,13 @@ class CardWorkflow:
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=STATUS_RETRY,
                 )
-                await self._write_status(job_id, "ожидание", result_json=draft_json)
+                # Последняя попытка могла закончиться ошибкой ссылок: человек должен её увидеть.
+                await self._write_status(
+                    job_id,
+                    "ожидание",
+                    result_json=draft_json,
+                    error="\n".join(pending_errors) if pending_errors else None,
+                )
         await workflow.wait_condition(lambda: self._decision is not None)
         final = "согласовано" if self._decision == "approve" else "отказ"
         await self._write_status(job_id, final, result_json=draft_json)

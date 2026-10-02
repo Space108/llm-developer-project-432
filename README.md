@@ -20,7 +20,7 @@ xlsx, строит по ним поисковый индекс и генерир
 
 ## Стек
 
-- Python 3.11+ (урок фиксирует 3.12; на этой машине сейчас 3.11)
+- Python 3.11+ (урок фиксирует 3.12; в CI тоже 3.12)
 - FastAPI, Pydantic, SQLAlchemy, asyncpg
 - PostgreSQL 16 с pgvector (`pgvector/pgvector:pg16`)
 - Temporal (dev-сервер в Compose, один контейнер)
@@ -29,13 +29,15 @@ xlsx, строит по ним поисковый индекс и генерир
 
 ## Быстрый старт (~15 минут)
 
-Ориентир шага сдачи: посторонний поднимает сервис по одному README. Если Docker, Ollama и модели уже стоят, путь ниже укладывается примерно в 15 минут. Холодный ноутбук (первый `pip install`, первый скачок эмбеддингов и весов Ollama) займёт дольше — это нормально, шаги те же.
+Ориентир шага сдачи: посторонний поднимает сервис по одному README. Если Docker, Ollama и модели уже стоят, путь ниже укладывается примерно в 15 минут. Холодный ноутбук (первая установка зависимостей, первый скачок эмбеддингов и весов Ollama) займёт дольше — это нормально, шаги те же.
+
+Весь путь ниже пройден целиком на Windows 11 в Windows PowerShell 5.1: от пустой базы до подтверждённой карточки. Отличия для bash и zsh (Linux, macOS) отмечены в замечаниях, на них путь отдельно не прогонялся.
 
 ### Что нужно заранее
 
-1. **Docker Desktop** — запущен, без него Compose не поднимет Postgres и Temporal.
-2. **Python 3.11+** (урок фиксирует 3.12; на Windows удобно `py -3`).
-3. **Ollama** — [ollama.com](https://ollama.com), сервис слушает `11434`. Две модели:
+1. **Docker Desktop** — запущен, без него Compose не поднимет Postgres и Temporal. На хосте должны быть свободны порты `5432` (Postgres), `7233` и `8233` (Temporal) и `8000` (API); если на `5432` уже стоит свой Postgres, останови его на время работы.
+2. **Python 3.11+** (урок фиксирует 3.12; на Windows удобно `py -3`) и **uv** ([docs.astral.sh/uv](https://docs.astral.sh/uv/), подойдёт `pip install uv`): зависимости ставятся строго из `uv.lock`.
+3. **Ollama** — [ollama.com](https://ollama.com), сервис слушает `11434`. Две модели (около 4,7 и 2 ГБ; на ноутбуке без видеокарты карточка по одному документу собиралась около полутора минут):
 
 ```powershell
 ollama pull qwen2.5:7b
@@ -44,31 +46,32 @@ ollama pull llama3.2:3b
 
 Проверка: `curl.exe http://127.0.0.1:11434/v1/models` отвечает JSON. Вместо Ollama можно LM Studio (часто порт `1234`) или OpenRouter — тогда в `.env` меняются `LLM_BASE_URL`, `LLM_MODEL`, `LLM_CHEAP_MODEL` и при необходимости `LLM_API_KEY`.
 
-4. **Hugging Face** — эмбеддинги `google/embeddinggemma-300m` качает `sentence-transformers` при первом разборе/поиске. Нужен аккаунт и доступ к модели на сайте HF (без входа бывал ответ `401`). Один раз:
-
-```powershell
-pip install huggingface_hub
-huggingface-cli login
-```
-
-Дальше веса лежат в кэше на диске, повторно качать не нужно.
+4. **Hugging Face** — эмбеддинги `google/embeddinggemma-300m` качает `sentence-transformers` при индексации первого документа. Модель закрытая, поэтому нужны три вещи: аккаунт на [huggingface.co](https://huggingface.co), принятые условия на [странице модели](https://huggingface.co/google/embeddinggemma-300m) и токен с правом чтения ([создать токен](https://huggingface.co/settings/tokens)). Без них загрузка падает с ответом `401` или `403`. Вход делается один раз в шаге 1 командой `hf auth login`, отдельно ничего ставить не нужно. Дальше веса лежат в кэше на диске, повторно качать их не придётся.
 
 ### 1. Клон и зависимости
 
 ```powershell
 git clone https://github.com/Space108/llm-developer-project-432.git
 cd llm-developer-project-432
-py -3 -m venv .venv
+uv sync --frozen --extra dev
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
 copy .env.example .env
+hf auth login
 ```
 
-Первый `pip install` тянет в том числе `torch` — может занять заметное время.
+`uv sync --frozen` ставит ровно те версии, что записаны в `uv.lock` (то же делают `make setup` и CI), и сам создаёт `.venv`. Первая установка тянет в том числе `torch` (CPU-сборка) — может занять заметное время.
+
+`hf auth login` просит токен Hugging Face из пункта 4 выше. Вставь его; на вопрос про git credential можно ответить `n`.
+
+Следующие команды выполняй в этом же окне, где активирован `.venv` (в начале строки появится название окружения в скобках). В каждом новом окне нужно перейти в папку проекта и снова выполнить `.\.venv\Scripts\Activate.ps1`.
+
+Если PowerShell пишет, что выполнение сценариев отключено, выполни `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` и повтори активацию. Для bash и zsh вместо Activate.ps1 и `copy`: `source .venv/bin/activate` и `cp .env.example .env`.
+
+Без uv запасной путь: `py -3 -m venv .venv`, активация и `pip install -e ".[dev]"`; версии тогда не закреплены lock-файлом.
 
 ### 2. Настройка `.env`
 
-Открой `.env` и выставь модель (пример под Ollama). Остальное из `.env.example` трогать не нужно: `DATABASE_URL`, Temporal и пороги уже заполнены.
+Открой `.env` (например, `notepad .env`) и выставь модель (пример под Ollama). Остальное из `.env.example` трогать не нужно: `DATABASE_URL`, Temporal и пороги уже заполнены.
 
 ```env
 LLM_BASE_URL=http://127.0.0.1:11434/v1
@@ -81,19 +84,20 @@ LLM_TIMEOUT_SECONDS=120
 
 ### 3. Инфраструктура и миграции
 
-Чистые тома — тот же способ, которым проверяют сдачу:
-
 ```powershell
-docker compose down -v
-docker compose up -d
+docker compose up -d --wait
 python -m app.core.migrate
 ```
 
-Миграции печатают `применена <файл>` или `новых нет`. Должны пройти `0001`…`0005`.
+`--wait` возвращает управление, когда Postgres и Temporal прошли проверку здоровья (около 10 секунд; в первый раз дольше, пока скачиваются образы). Без него миграции могут стартовать раньше, чем база готова.
+
+Миграции печатают `применена <файл>` или `новых нет`. Должны пройти `0001`…`0006`; второй запуск печатает `новых нет`.
+
+Начать с чистой базы, как делает проверка сдачи: `docker compose down -v` (все данные базы будут удалены), затем те же две команды.
 
 ### 4. Два процесса
 
-Два терминала, в обоих активирован `.venv`:
+Два отдельных окна PowerShell, в обоих активирован `.venv` (каждое окно занято своим процессом, закрывать их нельзя):
 
 ```powershell
 uvicorn app.main:app --reload
@@ -103,9 +107,11 @@ uvicorn app.main:app --reload
 python -m app.temporal.worker
 ```
 
-Без воркера разбор файла и генерация карточки не сдвинутся с места. UI Temporal: http://127.0.0.1:8233
+Без воркера разбор файла и генерация карточки не сдвинутся с места. Воркер при запуске ничего не печатает, это нормально. UI Temporal: http://127.0.0.1:8233
 
 ### 5. Живость и готовность
+
+Шаги 5–7 выполняй в третьем окне (`.venv` там нужен только для шага 8). В bash и zsh пиши `curl` вместо `curl.exe`. Если в Windows PowerShell 5.1 русские слова в ответах показываются кракозябрами, выполни один раз в этом окне `[Console]::OutputEncoding = [Text.Encoding]::UTF8`.
 
 ```powershell
 curl.exe http://127.0.0.1:8000/health
@@ -130,26 +136,48 @@ curl.exe -F "file=@data/kettle_manual.pdf" http://127.0.0.1:8000/documents/
 curl.exe http://127.0.0.1:8000/documents/DOCUMENT_ID
 ```
 
-Нужный статус: `проиндексирован`, в ответе есть `fragment_count`. Скан `data/boiler_scan.pdf` уходит в `отказ` с причиной `нет текстового слоя` — так и должно быть.
+Нужный статус: `проиндексирован`. Для `data/kettle_manual.pdf` ответ выглядит так: `{"document_id":"8b7cf1509ce2","status":"проиндексирован","fragment_count":4,"error":null}`. Скан `data/boiler_scan.pdf` уходит в `отказ`: `{"document_id":"…","status":"отказ","fragment_count":0,"error":"нет текстового слоя"}` — так и должно быть.
 
 ### 7. Карточка
 
-Подставь тот же `document_id`. В ответе будет `job_id`.
+Подставь тот же `document_id`. Запросу нужно тело в JSON, а кавычки в PowerShell зависят от версии (запись `-d "{\"…\"}"` с `curl.exe` в 5.1 ломает JSON), поэтому ниже способы, которые работают без возни с кавычками.
 
-```powershell
-curl.exe -X POST http://127.0.0.1:8000/generate-card -H "Content-Type: application/json" -d "{\"document_ids\":[\"DOCUMENT_ID\"],\"product_hint\":\"чайник\"}"
-curl.exe http://127.0.0.1:8000/jobs/JOB_ID
+**Swagger в браузере (любая ОС).** Открой http://127.0.0.1:8000/docs, раскрой `POST /generate-card`, нажми *Try it out*, вставь тело и нажми *Execute*:
+
+```json
+{"document_ids": ["DOCUMENT_ID"], "product_hint": "чайник"}
 ```
 
-Документ с инъекцией — `data/kettle_manual.pdf`: подозрительный фрагмент не попадает в контекст (или весь документ уходит к человеку, если подозрительных фрагментов слишком много). В результате задачи смотри поле `security`. Цена вроде «1 рубль» из инъекции в карточке не должна появиться.
-
-Подтверждение:
+**PowerShell** (проверено в 5.1):
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8000/jobs/JOB_ID/approve
+$body = @{ document_ids = @("DOCUMENT_ID"); product_hint = "чайник" } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/generate-card -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body))
+```
+
+**bash и zsh:**
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate-card -H "Content-Type: application/json" -d '{"document_ids":["DOCUMENT_ID"],"product_hint":"чайник"}'
+```
+
+В ответе будет `job_id`. Состояние задачи (вместо `JOB_ID` подставь свою строку):
+
+```powershell
+curl.exe -s http://127.0.0.1:8000/jobs/JOB_ID
+```
+
+Статус меняется: `поиск`, `генерация`, `проверка` и, наконец, `ожидание`. Это значит, что карточка готова и ждёт решения человека; в `result` лежат поля карточки, `sources` (откуда взят каждый факт), `missing_fields` (чего в документе нет) и `confidence` (ниже 1, если данных не хватило). Для `kettle_manual.pdf` с подсказкой `чайник` это около полутора минут без видеокарты. Пока статус другой, `result` пуст — просто повтори запрос.
+
+Подтверждение (статус станет `согласовано`):
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8000/jobs/JOB_ID/approve
 ```
 
 Отказ: `POST /jobs/JOB_ID/reject`.
+
+**Защита в деле.** `data/kettle_manual.pdf` содержит раздел с инъекцией («игнорируй инструкции…», цена «1 рубль») и контактами. Подсказка `чайник` его не затрагивает, и в `security` пусто. Чтобы увидеть защиту, повтори запрос на генерацию с `"product_hint": "условия сотрудничества"`: подозрительный фрагмент исключается (`security.excluded`), телефон и почта маскируются (`security.masked`), контекста не остаётся, поэтому карточка пустая, `missing_fields` перечисляет все поля, а `error` равен `контекст пуст`. Если подозрительных фрагментов слишком много, весь документ уходит к человеку. Цена вроде «1 рубль» из инъекции в карточке не появляется ни в одном из двух запросов.
 
 ### 8. Тесты и метрики
 
@@ -158,7 +186,11 @@ ruff check
 pytest
 ```
 
-Метрики по эталону (файл `data/golden_cards.json` кладётся локально, в git не входит; без него `make metrics` не из чего считать). Сводка последнего прогона сдачи — в [docs/acceptance-report.md](docs/acceptance-report.md).
+Тестам модель не нужна. Тесты, которым нужны база и Temporal, без поднятого Compose пропускаются (`skipped`), с ним выполняются.
+
+Необязательный набор на сто документов `data/bulk/` прогоняет `tests/test_bulk_sweep.py`: только разбор, без базы и модели, около 6 секунд. Он проверяет, что разбор не заточен под пять выданных файлов (результаты — в [docs/acceptance-report.md](docs/acceptance-report.md)). Нет папки `data/bulk/` — тесты пропускаются.
+
+Метрики по эталону `data/golden_cards.json`: он входит в выданный набор и лежит в репозитории рядом с документами. Сводка последнего прогона сдачи — в [docs/acceptance-report.md](docs/acceptance-report.md).
 
 ```powershell
 make metrics
@@ -179,11 +211,12 @@ make metrics-all
 | Защита | `app/services/pii.py`, `injection.py`, `security.py` |
 | Модель | `app/llm/client.py` — таймаут, повтор, запись в `llm_calls` |
 | Процесс | `app/temporal/` — CardWorkflow, DocumentWorkflow |
-| Миграции | `db/migrations/` до `0005_llm_calls.sql` |
+| Миграции | `db/migrations/` до `0006_hexlet_chunks.sql` |
+| Имена каркаса | `app/rag/`, `app/guardrails/`, `services/rag_pipeline.py`, `repositories/chunks.py` и др. повторяют имена из контракта модулей; боевой поток идёт мимо них, см. [ADR 0005](docs/adr/0005-scaffold-compat-layer.md) |
 
 Без `DATABASE_URL` приложение не стартует. В git лежит `.env.example`, не настоящий `.env`.
 
-Выданные файлы для приёмки лежат в `data/` и в git: `blender_passport.pdf`, `blender_kp.docx`, `kettle_manual.pdf`, `kettle_spec.xlsx`, `boiler_scan.pdf`. Скан без текстового слоя уходит в `отказ`.
+Выданные файлы для приёмки лежат в `data/` и в git: `blender_passport.pdf`, `blender_kp.docx`, `kettle_manual.pdf`, `kettle_spec.xlsx`, `boiler_scan.pdf` и эталон `golden_cards.json`. Скан без текстового слоя уходит в `отказ`. Необязательный набор на сто документов для прогона на объёме лежит в `data/bulk/`, его проверяет `tests/test_bulk_sweep.py`.
 
 ## О Хекслете
 

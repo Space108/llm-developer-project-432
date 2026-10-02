@@ -4,6 +4,7 @@ import json
 
 from pydantic import ValidationError
 
+from app.agents.prompts import repair_request
 from app.llm.parse import parse_model_json
 from app.schemas.cards import (
     CardDraft,
@@ -50,11 +51,7 @@ async def validate_or_retry(prompt: str, *, max_attempts: int = 3) -> CardDraft:
 
 async def regenerate_field(card: CardDraft, field: str, error: str) -> CardDraft:
     """Исправить одно поле карточки."""
-    prompt = (
-        "Текущий черновик:\n"
-        + card.model_dump_json()
-        + f"\n\nИсправь только поле {field}. {error}"
-    )
+    prompt = repair_request(card.model_dump_json(), field, error)
     raw = await run_agent("repair", prompt)
     data = parse_model_json(raw) if isinstance(raw, str) else raw
     if isinstance(data, str):

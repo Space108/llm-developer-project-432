@@ -53,6 +53,17 @@ async def find_document_by_hash(content_hash: str) -> dict | None:
     return {"id": row["id"], "status": row["status"], "error": row["error"]}
 
 
+async def find_document_id_by_filename(filename: str) -> str | None:
+    """Идентификатор уже загруженного документа с таким именем файла."""
+    async with connection() as conn:
+        result = await conn.execute(
+            text("SELECT id FROM documents WHERE filename = :name LIMIT 1"),
+            {"name": filename},
+        )
+        row = result.first()
+    return None if row is None else str(row[0])
+
+
 async def insert_document(
     document_id: str,
     filename: str,

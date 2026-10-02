@@ -24,13 +24,13 @@ async def guard_context(
     """Маскирование PII и отсев инъекций до модели."""
     if isinstance(payload, list) and payload and isinstance(payload[0], FragmentHit):
         return screen_hits(
-            payload,  # type: ignore[arg-type]
+            payload,
             limit if limit is not None else settings.context_size_limit,
         )
 
     if isinstance(payload, list):
         return await _guard_chunk_dicts(
-            payload,  # type: ignore[arg-type]
+            payload,
             limit if limit is not None else settings.context_size_limit,
         )
 

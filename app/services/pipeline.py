@@ -10,6 +10,7 @@ from app.agents.prompts import (
     extractor_prompt,
     generator_prompt,
     repair_prompt,
+    repair_request,
 )
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -243,11 +244,7 @@ def repair_field(data: dict, field: str, model: type[T], schema: dict) -> T:
     else:
         error = "исправь поле " + field
     field_schema = _field_schema(schema, field)
-    user = (
-        "Текущий черновик:\n"
-        + json.dumps(data, ensure_ascii=False)
-        + f"\n\nИсправь только поле {field}. {error}"
-    )
+    user = repair_request(json.dumps(data, ensure_ascii=False), field, error)
     raw = LlmClient().complete(
         _with_schema(repair_prompt(field), field_schema),
         user,

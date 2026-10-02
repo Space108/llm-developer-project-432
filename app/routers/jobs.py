@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from temporalio.service import RPCError, RPCStatusCode
 
 from app.core.config import settings
 from app.core.logging import bind_log, get_logger
@@ -52,13 +53,25 @@ async def read_job(job_id: str) -> JobView:
 
 @router.post("/jobs/{job_id}/approve")
 async def approve_job(job_id: str) -> dict[str, str]:
-    client = await connect()
-    await client.get_workflow_handle(job_id).signal(CardWorkflow.approve)
+    await _send_signal(job_id, CardWorkflow.approve)
     return {"id": job_id, "signal": "approve"}
 
 
 @router.post("/jobs/{job_id}/reject")
 async def reject_job(job_id: str) -> dict[str, str]:
-    client = await connect()
-    await client.get_workflow_handle(job_id).signal(CardWorkflow.reject)
+    await _send_signal(job_id, CardWorkflow.reject)
     return {"id": job_id, "signal": "reject"}
+
+
+async def _send_signal(job_id: str, signal) -> None:
+    """Сигнал процессу. Нет такого процесса или он уже завершён — 404, а не 500."""
+    client = await connect()
+    try:
+        await client.get_workflow_handle(job_id).signal(signal)
+    except RPCError as exc:
+        if exc.status == RPCStatusCode.NOT_FOUND:
+            raise HTTPException(
+                status_code=404,
+                detail="job not found or already finished",
+            ) from exc
+        raise

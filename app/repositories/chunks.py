@@ -18,7 +18,7 @@ __all__ = [
 def _as_list(vector: object) -> list[float]:
     if hasattr(vector, "tolist"):
         vector = vector.tolist()
-    return [float(item) for item in vector]  # type: ignore[arg-type]
+    return [float(item) for item in vector]
 
 
 def _vector_literal(values: list[float]) -> str:
