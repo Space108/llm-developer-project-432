@@ -4,12 +4,14 @@ import sys
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.db import close_pool, connection, open_pool
 
 MIGRATIONS = Path(__file__).resolve().parents[2] / "db" / "migrations"
+# Ключ advisory-блокировки: два применяющих миграции процесса идут по очереди.
+MIGRATION_LOCK_KEY = 432_000_001
+_TABLE_READY = "to_regclass('schema_migrations') IS NOT NULL"
 
 
 def split_sql(script: str) -> list[str]:
@@ -82,11 +84,11 @@ def migration_files() -> list[Path]:
 
 
 async def _applied_versions(conn: AsyncConnection) -> set[str]:
-    try:
-        result = await conn.execute(text("SELECT version FROM schema_migrations"))
-    except ProgrammingError:
-        await conn.rollback()
+    # Проверка без ошибки и отката: откат сбросил бы блокировку транзакции.
+    ready = await conn.execute(text(f"SELECT {_TABLE_READY}"))
+    if not ready.scalar():
         return set()
+    result = await conn.execute(text("SELECT version FROM schema_migrations"))
     return {row[0] for row in result}
 
 
@@ -95,9 +97,38 @@ async def _execute_script(conn: AsyncConnection, script: str) -> None:
         await conn.exec_driver_sql(statement)
 
 
+def apply_migrations_sync(conn) -> list[str]:
+    """Те же миграции для синхронного соединения psycopg.
+
+    Его открывает `with connection()` (путь каркаса Хекслета). Схему определяют только файлы
+    `db/migrations`, второго описания таблиц в коде нет, поэтому порядок запуска не важен.
+    """
+    applied: list[str] = []
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_xact_lock(%s)", (MIGRATION_LOCK_KEY,))
+        cur.execute(f"SELECT {_TABLE_READY}")
+        done: set[str] = set()
+        if cur.fetchone()[0]:
+            cur.execute("SELECT version FROM schema_migrations")
+            done = {row[0] for row in cur.fetchall()}
+        for path in migration_files():
+            if path.name in done:
+                continue
+            for statement in split_sql(path.read_text(encoding="utf-8")):
+                cur.execute(statement)
+            cur.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (path.name,))
+            applied.append(path.name)
+    conn.commit()
+    return applied
+
+
 async def apply_migrations() -> list[str]:
     applied: list[str] = []
     async with connection() as conn:
+        # Один применяющий за раз: процесс, воркер и тесты могут стартовать вместе.
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK_KEY}
+        )
         done = await _applied_versions(conn)
         for path in migration_files():
             if path.name in done:

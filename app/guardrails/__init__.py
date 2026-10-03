@@ -70,6 +70,7 @@ async def _guard_chunk_dicts(
     findings: list[SecurityFinding] = []
     excluded: list[SecurityFinding] = []
     suspicious_ids: list[str] = []
+    suspicious = 0
     safe: list[dict] = []
     size = 0
 
@@ -99,6 +100,7 @@ async def _guard_chunk_dicts(
                 reason=f"детектор недоступен: {exc}",
             )
         if verdict.suspicious:
+            suspicious += 1
             reason = verdict.reason or "инъекция"
             excluded.append(
                 SecurityFinding(kind="injection", label=reason, fragment_id=chunk_id or None)
@@ -113,10 +115,13 @@ async def _guard_chunk_dicts(
         safe.append(piece)
         size += len(masked.text)
 
-    blocked = len(suspicious_ids) > settings.suspicious_chunk_limit
+    blocked = settings.too_many_suspicious(suspicious)
     reason = None
     if blocked:
-        reason = f"подозрительных фрагментов {len(suspicious_ids)}"
+        reason = (
+            f"подозрительных фрагментов {suspicious}, "
+            f"допустимо не больше {settings.suspicious_chunk_limit}"
+        )
         safe = []
     return safe, GuardReport(
         masked=findings,

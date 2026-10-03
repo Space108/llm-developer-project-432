@@ -43,8 +43,15 @@ class Settings(BaseSettings):
 
     @property
     def suspicious_chunk_limit(self) -> int:
-        """Имя из каркаса Хекслета."""
+        """Сколько подозрительных фрагментов допустимо: их отсеивают, документ остаётся.
+
+        Значение берётся из `injection_block_threshold`; имя свойства — из каркаса Хекслета.
+        """
         return self.injection_block_threshold
+
+    def too_many_suspicious(self, count: int) -> bool:
+        """Единое правило блокировки документа: подозрительных строго больше допустимого."""
+        return count > self.suspicious_chunk_limit
 
 
 settings = Settings()

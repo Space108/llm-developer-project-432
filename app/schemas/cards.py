@@ -50,7 +50,7 @@ class SecurityReport(BaseModel):
     def needs_review(self) -> bool:
         from app.core.config import settings
 
-        return len(self.suspicious_chunks) > settings.suspicious_chunk_limit
+        return settings.too_many_suspicious(len(self.suspicious_chunks))
 
     def __bool__(self) -> bool:
         return bool(self.masked or self.excluded or self.blocked or self.suspicious_chunks)

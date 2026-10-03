@@ -141,7 +141,7 @@ python -m app.core.migrate
 
 `--wait` возвращает управление, когда Postgres и Temporal прошли проверку здоровья (около 10 секунд; в первый раз дольше, пока скачиваются образы). Без него миграции могут стартовать раньше, чем база готова.
 
-Миграции печатают `применена <файл>` или `новых нет`. Должны пройти `0001`…`0006`; второй запуск печатает `новых нет`.
+Миграции печатают `применена <файл>` или `новых нет`. Должны пройти `0001`…`0007`; второй запуск печатает `новых нет`.
 
 Начать с чистой базы, как делает проверка сдачи: `docker compose down -v` (все данные базы будут удалены), затем те же две команды.
 
@@ -263,8 +263,8 @@ make metrics-all
 | Защита | `app/services/pii.py`, `injection.py`, `security.py` |
 | Модель | `app/llm/client.py` — таймаут, повтор, запись в `llm_calls` |
 | Процесс | `app/temporal/` — CardWorkflow, DocumentWorkflow |
-| Миграции | `db/migrations/` до `0006_hexlet_chunks.sql` |
-| Имена каркаса | `app/rag/`, `app/guardrails/`, `services/rag_pipeline.py`, `repositories/chunks.py` и др. повторяют имена из контракта модулей; боевой поток идёт мимо них, см. [ADR 0005](docs/adr/0005-scaffold-compat-layer.md) |
+| Миграции | `db/migrations/` до `0007_documents_defaults.sql`; схему определяют только они, порядок запуска тестов и миграций не важен |
+| Имена каркаса | `app/rag/`, `app/guardrails/`, `services/rag_pipeline.py`, `repositories/chunks.py` и др. повторяют имена из контракта модулей, но работают по тем же правилам защиты, с тем же порогом блокировки и через тот же `LlmClient`; хранилище у них своё (`chunks`), см. [ADR 0005](docs/adr/0005-scaffold-compat-layer.md) |
 
 Без `DATABASE_URL` приложение не стартует. В git лежит `.env.example`, не настоящий `.env`.
 

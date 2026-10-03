@@ -8,6 +8,7 @@ __all__ = [
     "embed_query",
     "existing_fragment_ids",
     "get_chunks_by_ids",
+    "load_chunks",
     "replace_fragments",
     "search_fts",
     "search_hybrid",
@@ -106,3 +107,39 @@ def get_chunks_by_ids(conn, ids: list[str]) -> dict[str, str]:
         cur.execute("SELECT id FROM chunks WHERE id = ANY(%s)", (list(ids),))
         found = {row[0] for row in cur.fetchall()}
     return {chunk_id: chunk_id for chunk_id in found}
+
+
+def load_chunks(conn, ids: list[str]) -> list[dict]:
+    """Чанки с текстом, метаданными и именем файла в порядке `ids`.
+
+    Формат совпадает с тем, что принимают `guard_context` и `build_context`.
+    Пустой текст берётся из колонки `content`; идентификаторов нет в базе — чанк пропускается.
+    """
+    if not ids:
+        return []
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT c.id,
+                   COALESCE(NULLIF(c."text", ''), c.content),
+                   c.doc_id,
+                   c.metadata,
+                   COALESCE(d.filename, '')
+            FROM chunks c
+            LEFT JOIN documents d ON d.id = c.doc_id
+            WHERE c.id = ANY(%s)
+            """,
+            (list(ids),),
+        )
+        rows = {row[0]: row for row in cur.fetchall()}
+    chunks: list[dict] = []
+    for chunk_id in ids:
+        row = rows.get(chunk_id)
+        if row is None:
+            continue
+        metadata = dict(row[3] or {})
+        metadata.setdefault("doc_id", row[2])
+        chunks.append(
+            {"chunk_id": row[0], "text": row[1], "metadata": metadata, "filename": row[4]}
+        )
+    return chunks

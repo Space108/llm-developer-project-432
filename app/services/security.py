@@ -57,9 +57,11 @@ def screen_hits(hits: list[FragmentHit], limit: int) -> ScreenedContext:
             continue
         masked_hits.append(safe)
 
-    threshold = settings.injection_block_threshold
-    if suspicious >= threshold:
-        reason = f"подозрительных фрагментов {suspicious}, порог {threshold}"
+    if settings.too_many_suspicious(suspicious):
+        reason = (
+            f"подозрительных фрагментов {suspicious}, "
+            f"допустимо не больше {settings.suspicious_chunk_limit}"
+        )
         report = SecurityReport(
             masked=findings,
             excluded=excluded,

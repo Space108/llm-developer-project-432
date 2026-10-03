@@ -105,53 +105,16 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
         self._ctx_token = None
 
     def __enter__(self):
+        # Схему создают только миграции. Импорт здесь, потому что migrate.py сам берёт db.py.
+        from app.core.migrate import apply_migrations_sync
+
         self._sync_conn = psycopg.connect(sync_database_url(settings.database_url))
-        with self._sync_conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS documents (
-                    id text PRIMARY KEY,
-                    filename text NOT NULL DEFAULT '',
-                    content_hash text NOT NULL DEFAULT '',
-                    kind text NOT NULL DEFAULT '',
-                    status text NOT NULL DEFAULT '',
-                    error text,
-                    path text NOT NULL DEFAULT '',
-                    created_at timestamptz NOT NULL DEFAULT now(),
-                    updated_at timestamptz NOT NULL DEFAULT now()
-                )
-                """
-            )
-            cur.execute(
-                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT ''"
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS chunks (
-                    id text PRIMARY KEY,
-                    doc_id text NOT NULL,
-                    ordinal integer NOT NULL DEFAULT 0,
-                    text text NOT NULL DEFAULT '',
-                    content text NOT NULL DEFAULT '',
-                    embedding vector,
-                    metadata jsonb NOT NULL DEFAULT '{}'::jsonb
-                )
-                """
-            )
-            cur.execute(
-                "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS ordinal integer NOT NULL DEFAULT 0"
-            )
-            cur.execute(
-                "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS text text NOT NULL DEFAULT ''"
-            )
-            cur.execute(
-                "ALTER TABLE chunks ALTER COLUMN embedding TYPE vector USING embedding::vector"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS chunks_doc_id_idx ON chunks (doc_id)"
-            )
-        self._sync_conn.commit()
+        try:
+            apply_migrations_sync(self._sync_conn)
+        except BaseException:
+            self._sync_conn.close()
+            self._sync_conn = None
+            raise
         self._ctx_token = _sync_stack.set(_sync_stack.get() + (self._sync_conn,))
         return self._sync_conn
 

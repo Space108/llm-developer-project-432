@@ -21,15 +21,32 @@ def setup_llm() -> None:
     return None
 
 
+class _AgentResult:
+    """Результат запуска агента. Поле `final_output` — как у Runner из каркаса."""
+
+    def __init__(self, final_output: str) -> None:
+        self.final_output = final_output
+
+
 class Runner:
-    """Заглушка имени из каркаса (openai-agents Runner) для патча в тестах."""
+    """Имя `Runner` из каркаса (openai-agents). Запуск идёт через `LlmClient`.
+
+    У агента читаются `instructions` (системный промпт), `schema` (JSON-схема ответа)
+    и `cheap` (дешёвая модель). Так у обоих потоков один путь к модели: те же таймаут,
+    ретраи и учёт вызовов в `llm_calls`. Тесты по-прежнему подменяют `Runner.run`.
+    """
 
     @staticmethod
-    async def run(agent, prompt: str):
-        class _Result:
-            final_output = ""
-
-        return _Result()
+    async def run(agent, prompt: str) -> _AgentResult:
+        client = LlmClient()
+        output = await asyncio.to_thread(
+            client.complete,
+            str(getattr(agent, "instructions", "") or ""),
+            prompt,
+            schema=getattr(agent, "schema", None),
+            cheap=bool(getattr(agent, "cheap", False)),
+        )
+        return _AgentResult(output)
 
 
 def _agent_retryable(exc: Exception) -> bool:
@@ -50,7 +67,8 @@ async def run_agent(agent, prompt: str):
                 Runner.run(agent, prompt),
                 timeout=settings.llm_timeout_seconds,
             )
-            return getattr(result, "final_output", "") or str(result)
+            output = getattr(result, "final_output", None)
+            return output if isinstance(output, str) else str(result)
         except Exception as exc:
             if attempt >= settings.llm_max_retries or not _agent_retryable(exc):
                 get_logger().error("llm_call_failed", attempt=attempt, error=repr(exc))

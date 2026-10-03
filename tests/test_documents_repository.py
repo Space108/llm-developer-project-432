@@ -26,6 +26,21 @@ async def _postgres_or_skip() -> None:
         pytest.skip(f"postgres unavailable: {exc}")
 
 
+async def _forget_documents(ids: list[str]) -> None:
+    """Убрать записи, созданные тестом: в общей базе их находит `metrics` по имени файла."""
+    if not ids:
+        return
+    try:
+        async with connection() as conn:
+            await conn.execute(
+                text("DELETE FROM fragments WHERE document_id = ANY(:ids)"), {"ids": ids}
+            )
+            await conn.execute(text("DELETE FROM documents WHERE id = ANY(:ids)"), {"ids": ids})
+            await conn.commit()
+    except Exception:
+        pass
+
+
 def _spec(path: Path) -> None:
     book = Workbook()
     sheet = book.active
@@ -228,6 +243,7 @@ _GIVEN = (
 
 async def test_five_given_files_are_stored() -> None:
     root = Path(__file__).resolve().parents[1] / "data"
+    created_ids: list[str] = []
     open_pool()
     try:
         await _postgres_or_skip()
@@ -237,12 +253,14 @@ async def test_five_given_files_are_stored() -> None:
             path = root / name
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             document_id = "giv" + hashlib.sha256(name.encode()).hexdigest()[:9]
-            stored_id, _created = await insert_document(
+            stored_id, created = await insert_document(
                 document_id,
                 name,
                 digest,
                 str(path.resolve()),
             )
+            if created:
+                created_ids.append(stored_id)
             if name == "kettle_spec.xlsx":
                 spec_id = stored_id
             again, created_again = await insert_document(
@@ -302,4 +320,5 @@ async def test_five_given_files_are_stored() -> None:
         assert "KTL-1000" not in rows[0]["text"]
         assert rows[0]["text"].startswith("KTL-1700: ")
     finally:
+        await _forget_documents(created_ids)
         await close_pool()

@@ -59,14 +59,18 @@ async def _run(golden_path: Path, *, full: bool) -> None:
             f"AVG\tchars={avg['characteristics']:.2f}\t"
             f"citation={avg['citation']:.2f}\tjudge={avg['judge']:.2f}"
         )
+        # Метрики зависят от порога релевантности: фиксируем его вместе с цифрами.
+        print(f"threshold\trelevance={settings.relevance_threshold}")
         report_dir = Path(settings.metrics_report_dir)
         report_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         path = report_dir / f"metrics_{stamp}.json"
-        path.write_text(
-            json.dumps({"documents": rows, "averages": avg}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        report = {
+            "relevance_threshold": settings.relevance_threshold,
+            "documents": rows,
+            "averages": avg,
+        }
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         get_logger().info("metrics_report", path=str(path), documents=len(rows))
         print(f"report\t{path}")
     finally:
@@ -123,8 +127,13 @@ async def _eval_one(filename: str, expected: dict) -> dict:
 
 
 async def _ensure_document(filename: str) -> str:
+    from app.temporal.activities import index_document_activity, parse_document_activity
+
     existing = await find_document_id_by_filename(filename)
     if existing is not None:
+        # Запись могла остаться разобранной, но без векторов (например, после тестов):
+        # без них поиск идёт только по словам и метрики занижаются. Повтор безопасен.
+        await index_document_activity(existing)
         return existing
     path = Path("data") / filename
     if not path.exists():
@@ -135,8 +144,6 @@ async def _ensure_document(filename: str) -> str:
     digest = hashlib.sha256(content).hexdigest()
     document_id = "met" + digest[:9]
     await insert_document(document_id, filename, digest, str(path))
-    from app.temporal.activities import index_document_activity, parse_document_activity
-
     await parse_document_activity(document_id)
     await index_document_activity(document_id)
     stored = await load_document(document_id)
