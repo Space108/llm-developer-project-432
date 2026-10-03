@@ -98,7 +98,7 @@ def run_context_pipeline(
     existing_ids: set[str],
     max_attempts: int = 3,
 ) -> tuple[CardDraft, int, str]:
-    """Генерация из контекста. Выдуманная ссылка — переделка, повтор — к человеку."""
+    """Генерация из контекста. Выдуманная ссылка — переделка, повтор — ожидание решения."""
     if not context_ids:
         return empty_context_card(), 0, "ожидание"
     feedback: list[str] | None = None

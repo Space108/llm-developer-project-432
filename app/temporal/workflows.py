@@ -219,7 +219,7 @@ class CardWorkflow:
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=STATUS_RETRY,
                 )
-                # Последняя попытка могла закончиться ошибкой ссылок: человек должен её увидеть.
+                # Последняя попытка могла закончиться ошибкой ссылок: она остаётся в error.
                 await self._write_status(
                     job_id,
                     "ожидание",
