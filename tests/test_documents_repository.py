@@ -1,9 +1,12 @@
+import asyncio
 import hashlib
+import uuid
 from pathlib import Path
 
 import pytest
 from app.core.db import close_pool, connection, open_pool
 from app.core.migrate import apply_migrations
+from app.main import app
 from app.parsers.models import FragmentDraft
 from app.repositories.documents import (
     count_fragments,
@@ -12,8 +15,10 @@ from app.repositories.documents import (
     replace_fragments,
     update_document_status,
 )
+from app.routers import documents as documents_router
 from app.services.ingest import prepare_fragments
 from app.temporal.activities import parse_document_activity
+from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 from sqlalchemy import text
 
@@ -95,6 +100,94 @@ async def test_same_hash_keeps_one_document(tmp_path: Path) -> None:
                 )
                 await conn.execute(
                     text("DELETE FROM documents WHERE content_hash = 'hash-step5-spec'"),
+                )
+                await conn.commit()
+        except Exception:
+            pass
+        await close_pool()
+
+
+async def test_parallel_inserts_of_one_file_make_one_document() -> None:
+    digest = f"hash-race-{uuid.uuid4().hex}"
+    open_pool()
+    try:
+        await _postgres_or_skip()
+        await apply_migrations()
+        results = await asyncio.gather(
+            *(
+                insert_document(f"doc-race-{index}", "spec.xlsx", digest, "x")
+                for index in range(10)
+            )
+        )
+        assert len({document_id for document_id, _created in results}) == 1
+        assert sum(1 for _document_id, created in results if created) == 1
+    finally:
+        try:
+            async with connection() as conn:
+                await conn.execute(
+                    text("DELETE FROM documents WHERE content_hash = :hash"), {"hash": digest}
+                )
+                await conn.commit()
+        except Exception:
+            pass
+        await close_pool()
+
+
+async def test_parallel_uploads_of_one_file_do_not_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Оба запроса прошли проверку «такого файла нет»: второй не падает на `content_hash`."""
+    content = f"race-{uuid.uuid4().hex}".encode()
+    digest = hashlib.sha256(content).hexdigest()
+    monkeypatch.setattr("app.repositories.documents.UPLOADS", tmp_path)
+    real_find = documents_router.find_document_by_hash
+    barrier = asyncio.Barrier(2)
+    started: list[str] = []
+    calls = 0
+
+    async def find(content_hash: str):
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            await barrier.wait()
+            return None
+        return await real_find(content_hash)
+
+    class _Client:
+        async def start_workflow(self, *_args, **kwargs) -> None:
+            started.append(kwargs["id"])
+
+    async def fake_connect():
+        return _Client()
+
+    monkeypatch.setattr("app.routers.documents.find_document_by_hash", find)
+    monkeypatch.setattr("app.routers.documents.connect", fake_connect)
+    open_pool()
+    try:
+        await _postgres_or_skip()
+        await apply_migrations()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as http:
+            responses = await asyncio.gather(
+                *(
+                    http.post(
+                        "/documents/",
+                        files={"file": ("race.pdf", content, "application/pdf")},
+                    )
+                    for _ in range(2)
+                )
+            )
+        assert [item.status_code for item in responses] == [202, 202]
+        ids = {item.json()["document_id"] for item in responses}
+        assert len(ids) == 1
+        # Повторный старт с тем же id процесса Temporal отклоняет сам (WorkflowAlreadyStarted).
+        assert set(started) == ids
+        assert len(list(tmp_path.iterdir())) == 1
+    finally:
+        try:
+            async with connection() as conn:
+                await conn.execute(
+                    text("DELETE FROM documents WHERE content_hash = :hash"), {"hash": digest}
                 )
                 await conn.commit()
         except Exception:

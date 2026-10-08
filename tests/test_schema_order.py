@@ -4,7 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
-from app.core.db import close_pool, connection, open_pool
+from app.core.config import settings
+from app.core.db import close_pool, connection, open_pool, sync_database_url
 from app.core.migrate import apply_migrations, migration_files
 
 
@@ -60,9 +61,37 @@ async def test_repeated_connections_do_not_reapply(scratch_database) -> None:
 async def test_content_hash_stays_unique(scratch_database) -> None:
     with connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO documents (id, content_hash) VALUES ('a', 'same')")
+            cur.execute(
+                "INSERT INTO documents (id, kind, content_hash) VALUES ('a', 'pdf', 'same')"
+            )
             with pytest.raises(psycopg.errors.UniqueViolation):
-                cur.execute("INSERT INTO documents (id, content_hash) VALUES ('b', 'same')")
+                cur.execute(
+                    "INSERT INTO documents (id, kind, content_hash) VALUES ('b', 'pdf', 'same')"
+                )
+        conn.rollback()
+
+
+async def test_work_row_must_set_its_fields_but_scaffold_row_need_not(scratch_database) -> None:
+    """Умолчания 0007 действуют для строк с kind; рабочая строка без полей отвергается."""
+    with connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO documents (id, filename, content_hash, status, path) "
+                "VALUES ('work', 'a.pdf', 'h1', 'новый', 'data/uploads/a.pdf')"
+            )
+            cur.execute("INSERT INTO documents (id, kind) VALUES ('scaffold', 'pdf')")
+            rejected = [
+                "INSERT INTO documents (id, content_hash) VALUES ('empty', 'h2')",
+                "INSERT INTO documents (id, filename, content_hash, status, path) "
+                "VALUES ('half', 'a.pdf', 'h3', 'новый', '')",
+            ]
+            for statement in rejected:
+                cur.execute("SAVEPOINT attempt")
+                with pytest.raises(psycopg.errors.CheckViolation):
+                    cur.execute(statement)
+                cur.execute("ROLLBACK TO SAVEPOINT attempt")
+            cur.execute("SELECT count(*) FROM documents")
+            assert cur.fetchone()[0] == 2
         conn.rollback()
 
 
@@ -77,3 +106,21 @@ async def test_parallel_first_connections_apply_once(scratch_database) -> None:
         results = list(pool.map(lambda _: open_and_list(), range(4)))
     expected = [path.name for path in migration_files()]
     assert results == [expected] * 4
+
+
+async def test_without_auto_migrate_the_connection_does_not_touch_the_schema(
+    scratch_database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AUTO_MIGRATE=false: без прав на DDL соединение схему не создаёт, а говорит, что делать."""
+    monkeypatch.setattr(settings, "auto_migrate", False)
+    with pytest.raises(RuntimeError, match="python -m app.core.migrate"):
+        with connection():
+            pass
+    with psycopg.connect(sync_database_url(settings.database_url)) as check:
+        with check.cursor() as cur:
+            cur.execute("SELECT to_regclass('schema_migrations')")
+            assert cur.fetchone()[0] is None
+
+    assert await _apply_with_pool() == [path.name for path in migration_files()]
+    with connection() as conn:
+        assert _versions(conn) == [path.name for path in migration_files()]

@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.guardrails import injection as injection_mod
 from app.repositories.search import FragmentHit
 from app.schemas.cards import CardDraft, SecurityFinding, SecurityReport
+from app.services.injection import hard_rule_names
 from app.services.pii import mask_pii
 from app.services.security import ScreenedContext, filter_card_output, screen_hits
 
@@ -15,6 +16,19 @@ GuardReport = SecurityReport
 async def detect_injection_llm(text: str):
     """Реэкспорт с вызовом через модуль injection — патчи тестов Хекслета."""
     return await injection_mod.detect_injection_llm(text)
+
+
+def _hard_rules_win(text: str, verdict):
+    """Жёсткий маркер («SYSTEM:», «игнорируй инструкции») не отменяется ответом «чисто».
+
+    Так же устроен основной поток (`examine_fragment`): слабая модель не открывает дверь.
+    """
+    if verdict.suspicious:
+        return verdict
+    hard = hard_rule_names(text)
+    if not hard:
+        return verdict
+    return injection_mod.InjectionVerdict(suspicious=True, reason=",".join(hard))
 
 
 async def guard_context(
@@ -49,6 +63,7 @@ async def guard_context(
             suspicious=True,
             reason=f"детектор недоступен: {exc}",
         )
+    verdict = _hard_rules_win(text, verdict)
     if verdict.suspicious:
         reason = verdict.reason or "инъекция"
         excluded.append(SecurityFinding(kind="injection", label=reason, fragment_id=None))
@@ -92,6 +107,7 @@ async def _guard_chunk_dicts(
                         suspicious=True,
                         reason=f"детектор недоступен: {exc}",
                     )
+                verdict = _hard_rules_win(masked.text, verdict)
             else:
                 verdict = injection_mod.InjectionVerdict(suspicious=False)
         except Exception as exc:

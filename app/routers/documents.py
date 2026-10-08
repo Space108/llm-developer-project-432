@@ -6,9 +6,11 @@ from fastapi.responses import JSONResponse
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.repositories.documents import (
     add_document,
     count_fragments,
+    discard_upload,
     documents,
     find_document_by_hash,
     insert_document,
@@ -22,6 +24,7 @@ router = APIRouter()
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx"}
 
 
+@router.post("/documents", status_code=202, include_in_schema=False)
 @router.post("/documents/", status_code=202)
 async def upload_document(file: UploadFile = File(...)) -> JSONResponse:
     filename = file.filename or ""
@@ -36,12 +39,7 @@ async def upload_document(file: UploadFile = File(...)) -> JSONResponse:
     digest = hashlib.sha256(content).hexdigest()
     existing = await find_document_by_hash(digest)
     if existing is not None:
-        if existing["status"] == "новый":
-            await _start_parse(str(existing["id"]))
-        return JSONResponse(
-            {"document_id": existing["id"], "status": existing["status"]},
-            status_code=202,
-        )
+        return await _existing_response(existing)
     document = add_document(filename, content)
     document.status = "новый"
     document_id, created = await insert_document(
@@ -52,21 +50,28 @@ async def upload_document(file: UploadFile = File(...)) -> JSONResponse:
     )
     if created:
         await _start_parse(document_id)
-    else:
-        row = await find_document_by_hash(digest)
-        if row is not None and row["status"] == "новый":
-            await _start_parse(str(row["id"]))
-        if row is not None:
-            return JSONResponse(
-                {"document_id": row["id"], "status": row["status"]},
-                status_code=202,
-            )
-    return JSONResponse({"document_id": document_id, "status": "новый"}, status_code=202)
+        return JSONResponse({"document_id": document_id, "status": "новый"}, status_code=202)
+    # Тот же файл успел записать параллельный запрос: наш экземпляр на диске лишний.
+    discard_upload(document)
+    row = await find_document_by_hash(digest)
+    if row is None:
+        return JSONResponse({"document_id": document_id, "status": "новый"}, status_code=202)
+    return await _existing_response(row)
 
 
 @router.get("/documents/{document_id}")
 async def read_document(document_id: str) -> dict:
-    row = await load_document(document_id)
+    # База — источник правды; запись из памяти читается, только если в базе документа нет
+    # или база недоступна.
+    try:
+        row = await load_document(document_id)
+    except Exception:
+        if documents.get(document_id) is None:
+            raise
+        get_logger().warning(
+            "document_read_from_memory", document_id=document_id, reason="база недоступна"
+        )
+        row = None
     if row is None:
         memory = documents.get(document_id)
         if memory is None:
@@ -83,6 +88,13 @@ async def read_document(document_id: str) -> dict:
         "fragment_count": await count_fragments(document_id),
         "error": row["error"],
     }
+
+
+async def _existing_response(row: dict) -> JSONResponse:
+    """Файл уже в базе: разбор запускается, только если он ещё не начинался."""
+    if row["status"] == "новый":
+        await _start_parse(str(row["id"]))
+    return JSONResponse({"document_id": row["id"], "status": row["status"]}, status_code=202)
 
 
 async def _start_parse(document_id: str) -> None:

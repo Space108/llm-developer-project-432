@@ -59,7 +59,15 @@ async def retrieve_context_async(query: str, doc_ids: list[str] | None = None):
         own = connection()
         conn = own.__enter__()
     try:
-        hits = search_hybrid(conn, query, top_k=8, doc_ids=doc_ids)
+        # Порог тот же, что у основного поиска. Умолчание 0.0 у самих `search_*` — сигнатура
+        # каркаса, сквозной сценарий его не использует.
+        hits = search_hybrid(
+            conn,
+            query,
+            top_k=8,
+            threshold=settings.relevance_threshold,
+            doc_ids=doc_ids,
+        )
         chunks = load_chunks(conn, [hit["chunk_id"] for hit in hits])
     finally:
         if own is not None:

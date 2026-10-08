@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     search_limit: int = 10
     context_size_limit: int = 12000
     injection_block_threshold: int = 2
+    # Синхронное `with connection()` (слой каркаса) применяет недостающие миграции. Нужны права
+    # на DDL; там, где их нет, ставят false и применяют схему заранее: `python -m app.core.migrate`.
+    auto_migrate: bool = True
     golden_path: str = "data/golden_cards.json"
     metrics_report_dir: str = "data/reports"
     temporal_host: str = "localhost:7233"

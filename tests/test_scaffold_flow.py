@@ -189,3 +189,50 @@ async def test_all_blocking_places_use_one_threshold(
 
     report = SecurityReport(suspicious_chunks=[f"b{i}" for i in range(count)])
     assert report.needs_review is expected
+
+
+def _detector_says(monkeypatch: pytest.MonkeyPatch, suspicious: bool) -> None:
+    answer = '{"suspicious": %s, "reason": ""}' % str(suspicious).lower()
+    monkeypatch.setattr(
+        injection_service.LlmClient, "complete", lambda _self, *_a, **_k: answer
+    )
+
+
+async def test_hard_rule_is_not_overridden_by_a_clean_model_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Как в основном потоке: «SYSTEM:» и «игнорируй инструкции» остаются подозрительными."""
+    _detector_says(monkeypatch, suspicious=False)
+    chunks = [
+        {"chunk_id": "bad", "text": BAD_TEXT, "metadata": {}},
+        {"chunk_id": "ok", "text": "Мощность чайника 1700 Вт", "metadata": {}},
+    ]
+    safe, report = await guard_context(chunks, 20000)
+    assert [item["chunk_id"] for item in safe] == ["ok"]
+    assert [item.fragment_id for item in report.excluded] == ["bad"]
+    assert "ignore_instructions" in report.excluded[0].label
+
+    text, text_report = await guard_context(BAD_TEXT)
+    assert text == ""
+    assert text_report.blocked is True
+
+
+async def test_soft_rule_alone_is_left_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Мягкое правило («1 рубль» в прайсе) без жёсткого: решает модель, «чисто» принимается."""
+    _detector_says(monkeypatch, suspicious=False)
+    chunks = [{"chunk_id": "price", "text": "Акция: чайник за 1 рубль к открытию", "metadata": {}}]
+    safe, report = await guard_context(chunks, 20000)
+    assert [item["chunk_id"] for item in safe] == ["price"]
+    assert report.excluded == []
+
+
+async def test_search_in_the_pipeline_uses_the_relevance_threshold(
+    scratch_database, fake_model, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Вектор запроса далёк от чанков (косинус 0) и слов общих нет: контекст пуст, не из мусора."""
+    with connection() as conn:
+        _seed(conn)
+    monkeypatch.setattr("app.repositories.chunks.embed_query", lambda _query: [0.0, 1.0, 0.0])
+    context, report = await retrieve_context_async("холодильник", ["d1"])
+    assert context == ""
+    assert report.excluded == []

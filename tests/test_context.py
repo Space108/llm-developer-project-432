@@ -18,7 +18,7 @@ def _hit(fragment_id: str, body: str, document_id: str = "doc") -> FragmentHit:
     )
 
 
-def _draft(chunk_id: str, confidence: float = 1) -> CardDraft:
+def _draft(chunk_id: str, confidence: float = 0.9) -> CardDraft:
     return CardDraft(
         title="Блендер 800 Вт",
         description="Мощность 800 Вт.",

@@ -57,7 +57,10 @@ async def test_existing_document_gets_missing_vectors(
 
     monkeypatch.setattr("app.temporal.activities.index_document_activity", fake_index)
     with connection() as conn, conn.cursor() as cur:
-        cur.execute("INSERT INTO documents (id, filename, status) VALUES ('d1', 'a.pdf', 'x')")
+        cur.execute(
+            "INSERT INTO documents (id, filename, status, path) "
+            "VALUES ('d1', 'a.pdf', 'x', 'data/uploads/a.pdf')"
+        )
     open_pool()
     try:
         assert await metrics._ensure_document("a.pdf") == "d1"

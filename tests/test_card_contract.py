@@ -1,5 +1,5 @@
 import pytest
-from app.schemas.cards import TITLE_MAX_LENGTH, ProductCard
+from app.schemas.cards import TITLE_MAX_LENGTH, CardDraft, ProductCard
 from pydantic import ValidationError
 
 
@@ -14,6 +14,25 @@ def test_confidence_stays_between_zero_and_one() -> None:
     ProductCard(confidence=1)
     with pytest.raises(ValidationError):
         ProductCard(confidence=1.2)
+
+
+def test_missing_fields_forbid_full_confidence() -> None:
+    with pytest.raises(ValidationError, match="confidence должен быть меньше 1"):
+        ProductCard(missing_fields=["Цвет"], confidence=1)
+    ProductCard(missing_fields=["Цвет"], confidence=0.9)
+    ProductCard(missing_fields=[], confidence=1)
+
+
+def test_model_answer_with_full_confidence_and_gaps_is_rejected_as_a_whole() -> None:
+    answer = {
+        "title": "Блендер",
+        "description": "Мощность 800 Вт",
+        "missing_fields": ["Цвет"],
+        "confidence": 1.0,
+    }
+    with pytest.raises(ValidationError):
+        CardDraft.model_validate(answer)
+    assert CardDraft.model_validate({**answer, "confidence": 0.8}).confidence == 0.8
 
 
 def test_empty_characteristic_does_not_stay_on_the_card() -> None:

@@ -77,6 +77,39 @@ def test_docx_heading_becomes_section(tmp_path: Path) -> None:
     assert body[0].page == 1
 
 
+def test_docx_table_keeps_its_place_and_section(tmp_path: Path) -> None:
+    """Таблица берёт заголовок, под которым стоит, а не последний заголовок документа."""
+    path = tmp_path / "offer.docx"
+    document = Document()
+    document.add_heading("Прайс-лист", level=1)
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "BLD-800"
+    table.cell(0, 1).text = "2 190 ₽"
+    table.cell(1, 0).text = "BLD-500"
+    table.cell(1, 1).text = "1 490 ₽"
+    document.add_heading("Ваш менеджер", level=1)
+    document.add_paragraph("Анна Смирнова")
+    document.save(path)
+
+    blocks = parse_docx(path)
+    tables = [block for block in blocks if block.kind == "table"]
+    assert len(tables) == 1
+    assert tables[0].section == "Прайс-лист"
+    assert "BLD-800 | 2 190 ₽" in tables[0].text
+    texts = [block.text for block in blocks if block.text.strip()]
+    assert texts.index("Прайс-лист") < texts.index(tables[0].text) < texts.index("Ваш менеджер")
+    manager = [block for block in blocks if "Смирнова" in block.text]
+    assert manager[0].section == "Ваш менеджер"
+
+
+def test_blender_offer_price_table_sits_under_the_price_heading() -> None:
+    root = Path(__file__).resolve().parents[1]
+    outcome = prepare_fragments(root / "data" / "blender_kp.docx")
+    priced = [item for item in outcome.fragments if "2 190" in item.text]
+    assert priced
+    assert {item.section for item in priced} == {"Прайс-лист (опт)"}
+
+
 def test_blank_pdf_is_rejected_with_a_reason(tmp_path: Path) -> None:
     path = tmp_path / "scan.pdf"
     writer = PdfWriter()

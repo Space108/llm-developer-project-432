@@ -70,16 +70,19 @@ async def insert_document(
     content_hash: str,
     path: str,
 ) -> tuple[str, bool]:
-    """Новая строка или уже существующая по хешу файла."""
-    existing = await find_document_by_hash(content_hash)
-    if existing is not None:
-        return str(existing["id"]), False
+    """Новая строка или уже существующая по хешу файла.
+
+    Два одновременных запроса с одним файлом дают одну строку: вставку решает уникальный
+    `content_hash`, проигравший получает id победителя вместо ошибки.
+    """
     async with connection() as conn:
-        await conn.execute(
+        inserted = await conn.execute(
             text(
                 """
                 INSERT INTO documents (id, filename, content_hash, status, path)
                 VALUES (:id, :filename, :content_hash, 'новый', :path)
+                ON CONFLICT (content_hash) DO NOTHING
+                RETURNING id
                 """
             ),
             {
@@ -89,8 +92,24 @@ async def insert_document(
                 "path": path,
             },
         )
+        created = inserted.first() is not None
         await conn.commit()
-    return document_id, True
+        if created:
+            return document_id, True
+        found = await conn.execute(
+            text("SELECT id FROM documents WHERE content_hash = :content_hash"),
+            {"content_hash": content_hash},
+        )
+        row = found.first()
+    if row is None:
+        raise RuntimeError("документ не записан и не найден по хешу файла")
+    return str(row[0]), False
+
+
+def discard_upload(document: Document) -> None:
+    """Файл проигравшего гонку запроса не нужен: у документа уже есть свой."""
+    documents.pop(document.document_id, None)
+    document.path.unlink(missing_ok=True)
 
 
 async def load_document(document_id: str) -> dict | None:

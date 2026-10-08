@@ -147,6 +147,46 @@ def test_long_title_is_repaired_without_rewriting_description(monkeypatch) -> No
     )
 
 
+def test_full_confidence_with_gaps_is_healed_by_a_retry(monkeypatch) -> None:
+    prompts: list[str] = []
+
+    def complete(_self, _system: str, user: str, **_kwargs: object) -> str:
+        prompts.append(user)
+        confidence = 1.0 if len(prompts) == 1 else 0.7
+        return json.dumps(
+            {
+                "title": "Блендер",
+                "description": "Мощность 800 Вт.",
+                "missing_fields": ["Цвет"],
+                "confidence": confidence,
+            },
+            ensure_ascii=False,
+        )
+
+    monkeypatch.setattr(pipeline.LlmClient, "complete", complete)
+    draft = pipeline.generate(_facts())
+    assert draft.confidence == 0.7
+    assert len(prompts) == 2
+    assert "confidence должен быть меньше 1" in prompts[1]
+
+
+def test_full_confidence_with_gaps_does_not_pass_after_two_answers(monkeypatch) -> None:
+    def complete(_self, _system: str, _user: str, **_kwargs: object) -> str:
+        return json.dumps(
+            {
+                "title": "Блендер",
+                "description": "Мощность 800 Вт.",
+                "missing_fields": ["Цвет"],
+                "confidence": 1.0,
+            },
+            ensure_ascii=False,
+        )
+
+    monkeypatch.setattr(pipeline.LlmClient, "complete", complete)
+    with pytest.raises(ModelResponseError):
+        pipeline.generate(_facts())
+
+
 def test_sparse_text_waits_for_a_human(monkeypatch) -> None:
     monkeypatch.setattr(pipeline.settings, "confidence_threshold", 0.5)
     facts = SupplierFacts(product_name="Товар", missing_fields=["description", "benefits"])
