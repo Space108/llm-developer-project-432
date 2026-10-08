@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from app.core.config import settings
@@ -90,6 +91,23 @@ def screen_hits(hits: list[FragmentHit], limit: int) -> ScreenedContext:
     )
 
 
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _drop_flagged_sentences(text: str) -> str:
+    """Предложение со следом инструкции убирается целиком, а не вырезается по совпадению.
+
+    Вырезание куска давало обрубки вроде «Всего ь!». Если след в единственном предложении
+    (заголовок, значение характеристики), поле остаётся пустым: пустое лучше искажённого.
+    """
+    kept = [
+        part
+        for part in _SENTENCE_BREAK.split(text)
+        if part.strip() and not injection_service.rule_scan(part)
+    ]
+    return " ".join(kept).strip()
+
+
 def filter_card_output(draft: CardDraft) -> tuple[CardDraft, list[SecurityFinding]]:
     """Фильтр выхода: PII и следы служебных инструкций в карточке."""
     counters: dict[str, int] = {}
@@ -103,22 +121,22 @@ def filter_card_output(draft: CardDraft) -> tuple[CardDraft, list[SecurityFindin
                 SecurityFinding(kind=item.kind, label=item.label, fragment_id=None)
             )
         cleaned = masked.text
-        if injection_service.rule_scan(cleaned):
+        hits = injection_service.rule_scan(cleaned)
+        if hits:
             findings.append(
                 SecurityFinding(
                     kind="injection",
-                    label="следы инструкций на выходе",
+                    label="следы инструкций на выходе: " + ",".join(item.rule for item in hits),
                     fragment_id=None,
                 )
             )
-            for _name, pattern in injection_service._RULES:
-                cleaned = pattern.sub(" ", cleaned)
-            cleaned = " ".join(cleaned.split())
+            cleaned = _drop_flagged_sentences(cleaned)
         return cleaned
 
     data["title"] = _clean(str(data.get("title") or ""))
     data["description"] = _clean(str(data.get("description") or ""))
-    data["benefits"] = [_clean(str(item)) for item in data.get("benefits") or []]
+    benefits = [_clean(str(item)) for item in data.get("benefits") or []]
+    data["benefits"] = [item for item in benefits if item]
     data["characteristics"] = {
         key: _clean(str(value)) for key, value in (data.get("characteristics") or {}).items()
     }

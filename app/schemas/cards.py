@@ -80,6 +80,14 @@ class CardRules(BaseModel):
             raise ValueError("поле в двух списках: " + ", ".join(overlap))
         return self
 
+    @model_validator(mode="after")
+    def incomplete_card_is_not_fully_confident(self) -> "CardRules":
+        if self.missing_fields and self.confidence >= 1:
+            raise ValueError(
+                "confidence должен быть меньше 1, пока в missing_fields есть недостающие поля"
+            )
+        return self
+
 
 class CardDraft(CardRules):
     title: str = Field(max_length=TITLE_MAX_LENGTH)

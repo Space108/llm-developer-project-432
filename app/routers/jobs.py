@@ -36,12 +36,21 @@ async def create_job(
 
 @router.get("/jobs/{job_id}", response_model=JobView)
 async def read_job(job_id: str) -> JobView:
-    memory = jobs.get(job_id)
-    if memory is not None:
+    # Источник правды — база. Словарь из раннего шага — запасной путь: когда задачи нет в базе
+    # или база недоступна. Вторая причина нужна, чтобы запись из памяти не пропала вместе с ней.
+    try:
+        row = await load_job(job_id)
+    except Exception:
+        memory = jobs.get(job_id)
+        if memory is None:
+            raise
+        get_logger().warning("job_read_from_memory", job_id=job_id, reason="база недоступна")
         return JobView(status=memory.status, result=memory.result)
-    row = await load_job(job_id)
     if row is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        memory = jobs.get(job_id)
+        if memory is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return JobView(status=memory.status, result=memory.result)
     result = row["result"]
     return JobView(
         status=row["status"],

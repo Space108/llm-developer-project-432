@@ -97,6 +97,17 @@ async def _execute_script(conn: AsyncConnection, script: str) -> None:
         await conn.exec_driver_sql(statement)
 
 
+def pending_migrations_sync(conn) -> list[str]:
+    """Какие миграции ещё не применены. Только чтение: права на DDL не нужны."""
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {_TABLE_READY}")
+        done: set[str] = set()
+        if cur.fetchone()[0]:
+            cur.execute("SELECT version FROM schema_migrations")
+            done = {row[0] for row in cur.fetchall()}
+    return [path.name for path in migration_files() if path.name not in done]
+
+
 def apply_migrations_sync(conn) -> list[str]:
     """Те же миграции для синхронного соединения psycopg.
 

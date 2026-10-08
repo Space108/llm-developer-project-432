@@ -34,7 +34,23 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
         r"(вытащи|раскрой|reveal|dump).{0,30}(промпт|prompt|system)",
         re.I,
     )),
-    ("price_one_ruble", re.compile(r"(?<!\d)1\s*рубл", re.IGNORECASE)),
+    # Цена в один рубль в любой записи: «1 рубль», «1 рубля», «1 руб.», «1 ₽». «рубашка» не в счёт.
+    (
+        "price_one_ruble",
+        re.compile(r"(?<![\d.,])1\s*(?:₽|руб(?:л\w*|\b|\.))", re.IGNORECASE),
+    ),
+    # Команда назначить цену: глагол, слово «цена» и после него число или «бесплатно».
+    # Без значения («укажите цену в рублях при заказе») фраза обычная и не подозрительна.
+    # Правило мягкое, решает модель-детектор.
+    (
+        "price_override",
+        re.compile(
+            r"\b(?:установи|поставь|укажи|измени|смени|сделай|set|change)\w*\W+(?:\w+\W+){0,3}?"
+            r"(?:цен\w*|price)\W+(?:\w+\W+){0,3}?"
+            r"(?:\d|ноль|нулев|бесплатн|zero|free)",
+            re.IGNORECASE,
+        ),
+    ),
     (
         "long_encoded",
         re.compile(r"(?:[A-Za-z0-9+/]{80,}={0,2})"),
@@ -72,6 +88,11 @@ _HARD_RULES = frozenset(
 )
 
 
+def hard_rule_names(text: str) -> list[str]:
+    """Жёсткие правила, сработавшие на тексте. Вердикт модели их не отменяет."""
+    return [item.rule for item in rule_scan(text) if item.rule in _HARD_RULES]
+
+
 def model_scan(text: str, rules: list[InjectionHit] | None = None) -> InjectionVerdict:
     """Точный уровень. При недоступной модели фрагмент считается подозрительным."""
     marked = ", ".join(item.rule for item in rules) if rules else ""
@@ -103,6 +124,6 @@ def examine_fragment(text: str) -> tuple[bool, str]:
         return True, reason
     # Грубые маркеры не отдаём на милость слабой модели: дверь не открываем.
     hard = [item.rule for item in rules if item.rule in _HARD_RULES]
-    if hard:
+    if hard:  # то же, что hard_rule_names(text), без повторного прохода по правилам
         return True, ",".join(hard)
     return False, ""

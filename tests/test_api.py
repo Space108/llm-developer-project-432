@@ -203,3 +203,16 @@ def _skip_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.routers.documents.find_document_by_hash", missing)
     monkeypatch.setattr("app.routers.documents.insert_document", inserted)
     monkeypatch.setattr("app.routers.documents.connect", fake_connect)
+
+
+def test_post_documents_without_trailing_slash_is_not_redirected(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _skip_storage(monkeypatch)
+    response = client.post(
+        "/documents",
+        files={"file": ("passport.pdf", b"power 800 W", "application/pdf")},
+        follow_redirects=False,
+    )
+    assert response.status_code == 202

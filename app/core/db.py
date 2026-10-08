@@ -106,11 +106,22 @@ class _ConnectionCM(AbstractContextManager, AbstractAsyncContextManager):
 
     def __enter__(self):
         # Схему создают только миграции. Импорт здесь, потому что migrate.py сам берёт db.py.
-        from app.core.migrate import apply_migrations_sync
+        from app.core.migrate import apply_migrations_sync, pending_migrations_sync
 
         self._sync_conn = psycopg.connect(sync_database_url(settings.database_url))
         try:
-            apply_migrations_sync(self._sync_conn)
+            if settings.auto_migrate:
+                apply_migrations_sync(self._sync_conn)
+            else:
+                # Без прав на DDL: схему применяют заранее, здесь её только проверяют.
+                pending = pending_migrations_sync(self._sync_conn)
+                if pending:
+                    raise RuntimeError(
+                        "не применены миграции: "
+                        + ", ".join(pending)
+                        + ". Выполните `python -m app.core.migrate`"
+                        " (AUTO_MIGRATE=false отключает применение при открытии соединения)"
+                    )
         except BaseException:
             self._sync_conn.close()
             self._sync_conn = None
